@@ -1,18 +1,23 @@
-# Coolify deploy 用 docker-compose。
-# Coolify は GitHub repo の本ファイルを読んで backend をビルド/起動する。
-# 値(${...})はすべて Coolify の Environment Variables で設定する(git には書かない)。
-# DB は Firestore(クラウド)。push は FCM。どちらも GOOGLE_CREDENTIALS_JSON の SA 鍵で繋ぐ。
+# Guild42 Coolify デプロイ用 (infra-coolify-expert SKILL 準拠)。
+#  - `version:` キーは書かない (Compose V2。書くと "services section not found" になる)
+#  - `ports:` は書かない (Traefik が coolify network 経由でルーティング)
+#  - Coolify の Domains 欄には http://<domain>:8000 を設定 (https:// にしない)
+# Coolify は guild-42/ft_intra_fastapi repo の本ファイルを Docker Compose ビルドパックで読む。
+# 値 ${...} は Coolify の Environment Variables で設定 (git に secret は入れない)。
+# DB は Firestore、push は FCM。どちらも GOOGLE_CREDENTIALS_JSON の SA 鍵で繋ぐ。
 services:
-  backend:
+  ft-intra-backend:
     build: .
+    container_name: ft-intra-backend
     restart: unless-stopped
     environment:
+      TZ: Asia/Tokyo
       PORT: 8000
       # --- 42 API (Client Credentials + OAuth code 交換) ---
       FT_API_CLIENT_ID: ${FT_API_CLIENT_ID}
       FT_API_CLIENT_SECRET: ${FT_API_CLIENT_SECRET}
       # --- Firestore / FCM の Service Account 鍵 (JSON 全文) ---
-      # entrypoint.sh が /tmp/sa.json に書き出して GOOGLE_APPLICATION_CREDENTIALS に設定する
+      # entrypoint.sh が /tmp/sa.json に書き出して GOOGLE_APPLICATION_CREDENTIALS に設定
       GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON}
       # --- poller 間隔・対象 (任意。未設定なら下記 default) ---
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-300}
@@ -21,13 +26,16 @@ services:
       CHECKOUT_SWEEP_INTERVAL_SECONDS: ${CHECKOUT_SWEEP_INTERVAL_SECONDS:-600}
       FRIEND_POLLER_CAMPUS_IDS: ${FRIEND_POLLER_CAMPUS_IDS:-26}
       CHECKIN_TTL_SECONDS: ${CHECKIN_TTL_SECONDS:-10800}
-    # Coolify がリバースプロキシ + ドメイン + TLS を付与する。
-    # コンテナは 8000 を listen していれば良い(ports 公開は Coolify に任せる)。
-    expose:
-      - "8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 60s
       timeout: 5s
       retries: 3
       start_period: 20s
+    networks:
+      - coolify
+      - default
+
+networks:
+  coolify:
+    external: true
