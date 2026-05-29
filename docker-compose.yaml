@@ -16,9 +16,8 @@ services:
     environment:
       TZ: Asia/Tokyo
       PORT: 8000
-      # --- 42 API (Client Credentials + OAuth code 交換) ---
-      FT_API_CLIENT_ID: ${FT_API_CLIENT_ID}
-      FT_API_CLIENT_SECRET: ${FT_API_CLIENT_SECRET}
+      # --- 42 API creds は env ではなく /secrets/ft.env から読む(entrypoint.sh が source)---
+      # Coolify env は値が空で注入される不調があったため、SA 鍵と同じファイル方式に統一
       # --- Firestore / FCM の Service Account 鍵 ---
       # 下の volumes でマウントしたファイルを指す(env に JSON 全文は入れない)
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
@@ -30,8 +29,9 @@ services:
       FRIEND_POLLER_CAMPUS_IDS: ${FRIEND_POLLER_CAMPUS_IDS:-26}
       CHECKIN_TTL_SECONDS: ${CHECKIN_TTL_SECONDS:-10800}
     volumes:
-      # SA 鍵はサーバ上のファイルを read-only でマウント(Coolify env の 256 byte 制限回避)
+      # secret はサーバ上のファイルを read-only でマウント(Coolify env の制限/不調回避)
       - /opt/ft-intra-secrets/sa.json:/secrets/sa.json:ro
+      - /opt/ft-intra-secrets/ft.env:/secrets/ft.env:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 60s
