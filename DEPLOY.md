@@ -39,12 +39,12 @@ Firebase Console → プロジェクト `ft-intra-flutter` → ⚙️ 設定 →
 1. Coolify Dashboard → 対象 Project → **+ New Resource**
 2. **Docker Compose**(または Public Repository → Compose)を選び、ソースを
    `guild-42/ft_intra_fastapi`(branch `main`)に接続。
-3. Compose ファイルは repo の `docker-compose.yml`(`build: .` で Dockerfile からビルド)。
+3. Compose ファイルは repo の `docker-compose.yaml`(`build: .` で Dockerfile からビルド)。Coolify の **Docker Compose Location** はデフォルトの `/docker-compose.yaml` でOK(`.yml` ではなく `.yaml`)。
 4. **Strip Prefixes は OFF**(API パスをそのまま渡す)。
 
 ## 3. Environment Variables(ここが全て)
 
-リソース → **Environment Variables** に登録。`docker-compose.yml` の `${...}` が参照する。
+リソース → **Environment Variables** に登録。`docker-compose.yaml` の `${...}` が参照する。
 
 | Key | 値 | 必須 |
 |---|---|---|
