@@ -4,7 +4,10 @@
 #  - Coolify の Domains 欄には http://<domain>:8000 を設定 (https:// にしない)
 # Coolify は guild-42/ft_intra_fastapi repo の本ファイルを Docker Compose ビルドパックで読む。
 # 値 ${...} は Coolify の Environment Variables で設定 (git に secret は入れない)。
-# DB は Firestore、push は FCM。どちらも GOOGLE_CREDENTIALS_JSON の SA 鍵で繋ぐ。
+# Coolify の env 値は 256 byte 上限のため、SA 鍵(JSON)は env ではなく
+# ホストのファイル /opt/ft-intra-secrets/sa.json を read-only bind mount で渡す
+# (ファイル本体はサーバ上のみ。git にはパスしか入らない)。
+# DB は Firestore、push は FCM。どちらも /secrets/sa.json の SA 鍵で繋ぐ。
 services:
   ft-intra-backend:
     build: .
@@ -16,9 +19,9 @@ services:
       # --- 42 API (Client Credentials + OAuth code 交換) ---
       FT_API_CLIENT_ID: ${FT_API_CLIENT_ID}
       FT_API_CLIENT_SECRET: ${FT_API_CLIENT_SECRET}
-      # --- Firestore / FCM の Service Account 鍵 (JSON 全文) ---
-      # entrypoint.sh が /tmp/sa.json に書き出して GOOGLE_APPLICATION_CREDENTIALS に設定
-      GOOGLE_CREDENTIALS_JSON: ${GOOGLE_CREDENTIALS_JSON}
+      # --- Firestore / FCM の Service Account 鍵 ---
+      # 下の volumes でマウントしたファイルを指す(env に JSON 全文は入れない)
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
       # --- poller 間隔・対象 (任意。未設定なら下記 default) ---
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-300}
       REVIEW_POLL_INTERVAL_SECONDS: ${REVIEW_POLL_INTERVAL_SECONDS:-300}
@@ -26,6 +29,9 @@ services:
       CHECKOUT_SWEEP_INTERVAL_SECONDS: ${CHECKOUT_SWEEP_INTERVAL_SECONDS:-600}
       FRIEND_POLLER_CAMPUS_IDS: ${FRIEND_POLLER_CAMPUS_IDS:-26}
       CHECKIN_TTL_SECONDS: ${CHECKIN_TTL_SECONDS:-10800}
+    volumes:
+      # SA 鍵はサーバ上のファイルを read-only でマウント(Coolify env の 256 byte 制限回避)
+      - /opt/ft-intra-secrets/sa.json:/secrets/sa.json:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 60s
