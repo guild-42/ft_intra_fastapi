@@ -1,0 +1,19 @@
+# secrets — 絶対に commit しない
+.env
+.env.*
+*-sa.json
+*service-account*.json
+*-key.json
+sa.json
+/secrets/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.log
+
+# os
+.DS_Store
