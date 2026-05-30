@@ -1,123 +1,194 @@
-# DEPLOY.md — ft_intra42 backend を Guild42 Coolify にデプロイ
+# DEPLOY.md — ft_intra42 backend デプロイ / リリース運用書
 
-FastAPI backend を **Guild42 の Coolify(`ssh.cocoyo.org`)** に docker-compose でデプロイする手順。
-`~/.claude/skills/infra-coolify-expert` の規約に準拠。
-DB は **Firestore(クラウド固定)**、push は **FCM**。どちらも GCP に残し、SA 鍵 1 枚で繋ぐ。
-compute(この backend)だけ Coolify で動かす。
+FastAPI backend を **Coolify(自前サーバ）** にデプロイするための完全手順。
+**サーバが変わっても同じ手順で再現できる**ように、何が「サーバ非依存(クラウド側)」で
+何が「サーバ毎に作る」かを分けて記述する。実際に動作確認済み(2026-05-30)。
+
+repo: **`guild-42/ft_intra_fastapi`**(public)/ 内部ポート **8000**
 
 ```
-Flutter app ──OAuth──▶ 42 API
-     │  push ◀──────────────── FCM (Firebase, 無料の中継)
-     └─ POST /api/* ──▶ FastAPI (Coolify / ssh.cocoyo.org) ──┬─▶ Firestore (DB)
-                          + APScheduler 4 poller (常時CPUで安定)  └─▶ FCM
+[Flutter app] ──OAuth──▶ 42 API
+     │  push ◀───────────────── FCM (Firebase)
+     └─ POST /api/* ─▶ Cloudflare ─▶ cloudflared(tunnel) ─▶ Traefik(:443)
+                                                              └─▶ ft-intra-backend:8000
+                                                                    ├─▶ Firestore (DB)
+                                                                    └─▶ FCM (push)
 ```
 
-## Coolify 環境(固定)
+- **compute(この backend)だけ自前サーバ**。DB=Firestore / push=FCM は GCP に残す(箱に依存しない)。
+- secret は **Coolify の env に入れない**(後述の理由)。**サーバ上のファイルをマウント**して渡す。
 
-| Component | Value |
+---
+
+## A. サーバ非依存(クラウド側・一度作れば使い回す)
+
+サーバを変えても**これらは作り直さない**。新サーバはこれらに繋ぐだけ。
+
+### A-1. Firebase / GCP プロジェクト
+| 項目 | 値 |
 |---|---|
-| Server | `ssh.cocoyo.org`(`ssh kakun@ssh.cocoyo.org`)|
-| Reverse Proxy | Traefik v3 |
-| DNS / SSL | Cloudflare(SSL: Full)|
-| Docker Network | `coolify`(external)|
-| repo | `guild-42/ft_intra_fastapi`(public)|
-| 内部ポート | `8000` |
+| Project ID | `ft-intra-flutter` |
+| Project number | `1021337077830` |
+| Firestore | `(default)` / **Native mode** / `asia-northeast1` |
+| 用途 | **Firestore(DB)+ FCM(push)のみ**。compute は載せない |
 
----
+### A-2. Service Account(Firestore + FCM 用)
+| 項目 | 値 |
+|---|---|
+| SA | `firebase-adminsdk-fbsvc@ft-intra-flutter.iam.gserviceaccount.com` |
+| **必須ロール** | **`roles/datastore.user`**(これが無いと Firestore が `Missing or insufficient permissions`)|
 
-## 1. Service Account 鍵を用意(Firestore + FCM 兼用)
-
-Firebase Console → プロジェクト `ft-intra-flutter` → ⚙️ 設定 → **サービス アカウント** →
-「新しい秘密鍵を生成」→ JSON ダウンロード。
-
-- この 1 枚で **Firestore 読み書き + FCM 送信**の両方ができる。
-- **git に入れない**。次の手順で Coolify の secret env に貼るだけ。
-- ロールは最小に(Firestore User / Firebase Cloud Messaging API Sender 相当)。
-
-## 2. Coolify でリソース作成(Docker Compose)
-
-1. Coolify Dashboard → 対象 Project → **+ New Resource**
-2. **Docker Compose**(または Public Repository → Compose)を選び、ソースを
-   `guild-42/ft_intra_fastapi`(branch `main`)に接続。
-3. Compose ファイルは repo の `docker-compose.yaml`(`build: .` で Dockerfile からビルド)。Coolify の **Docker Compose Location** はデフォルトの `/docker-compose.yaml` でOK(`.yml` ではなく `.yaml`)。
-4. **Strip Prefixes は OFF**(API パスをそのまま渡す)。
-
-## 3. Environment Variables(ここが全て)
-
-リソース → **Environment Variables** に登録。`docker-compose.yaml` の `${...}` が参照する。
-
-| Key | 値 | 必須 |
-|---|---|---|
-| `FT_API_CLIENT_ID` | 42 の client_id(`u-s4t2ud-...`)| ✅ |
-| `FT_API_CLIENT_SECRET` | 42 の client_secret(**secret**)| ✅ |
-| `GOOGLE_CREDENTIALS_JSON` | 手順1の SA JSON **全文を貼る**(**secret**)| ✅ |
-| `POLL_INTERVAL_SECONDS` 他 | 省略可(default は compose 参照)| — |
-
-> `GOOGLE_CREDENTIALS_JSON` は JSON を改行込みでそのまま貼ってよい。`entrypoint.sh` が
-> コンテナ内 `/tmp/sa.json` に書き出し `GOOGLE_APPLICATION_CREDENTIALS` を自動設定する。
-> ホスト側に鍵ファイルを置く必要なし。
-
-## 4. Domains & DNS(Traefik + Cloudflare)
-
-1. Cloudflare(該当ゾーン)→ DNS → A レコード追加: `ft-intra` → サーバ IP(**Proxied**)。SSL は Full(ゾーン設定済み)。
-2. Coolify リソース → **Domains** に次を設定:
-   ```
-   http://ft-intra.<zone>:8000
-   ```
-   - **`http://` で書く**(`https://` だと 302 リダイレクトループ)。
-   - ポートは**コンテナ内部の 8000**(Traefik のルーティング先)。外部アクセスは `https://ft-intra.<zone>`(443, Cloudflare 終端)。
-
-> サブドメインは確定後にこの `<zone>` を実値に置換(既存サービスは `actraise.org` ゾーン配下)。
-> このドメインを Flutter app の `BACKEND_URL` に使う。**後で本サーバへ移す時は DNS を向け直すだけ**(アプリ無変更)。
-
-## 5. デプロイ & 確認
-
-1. **Deploy** → Coolify が Dockerfile をビルド・起動
-2. healthcheck が緑になるのを待つ
-3. 動作確認:
-   ```bash
-   curl https://ft-intra.<zone>/health
-   # {"status":"ok","poller":{"last_run":"..."},"valid_cookies":0,"registered_devices":0}
-   ```
-   `last_run` が更新されれば APScheduler(4 poller)が稼働。**Coolify は常時 CPU があるので Cloud Run のような throttle 問題は起きない。**
-
-ログ確認:
+ロール付与(一度だけ。プロジェクトに紐づくのでサーバ変更で消えない):
 ```bash
-ssh kakun@ssh.cocoyo.org "sudo docker logs ft-intra-backend --tail 30"
+gcloud projects add-iam-policy-binding ft-intra-flutter \
+  --member="serviceAccount:firebase-adminsdk-fbsvc@ft-intra-flutter.iam.gserviceaccount.com" \
+  --role="roles/datastore.user" --condition=None
 ```
 
-## 6. Flutter app を向け直す
+**SA 鍵 JSON の取得**(新サーバに置くため):
+Firebase Console → `ft-intra-flutter` → ⚙️ 設定 → サービスアカウント → 「新しい秘密鍵を生成」→ JSON。
+または:
+```bash
+gcloud iam service-accounts keys create sa.json \
+  --iam-account=firebase-adminsdk-fbsvc@ft-intra-flutter.iam.gserviceaccount.com \
+  --project ft-intra-flutter
+```
+> この JSON は秘密。**git 禁止**。サーバへは scp で運ぶ(後述)。
 
-`guild-42/ft_intra_app` の `lib/config/constants.dart` の `backendBaseUrl`
-(`--dart-define=BACKEND_URL=...`)を手順4のドメインに設定してビルド。
-
-## 7. あとで「臨時 VPS → 本サーバ」へ移すとき
-
-state はクラウド(Firestore / FCM)にあり**箱に依存しない**ので移行はほぼ再デプロイだけ:
-
-1. 本サーバの Coolify で同じ repo を接続(手順2〜3 を再現、env 再入力)
-2. Deploy
-3. **Cloudflare DNS を本サーバ IP に向け直す**(アプリ無変更)
-4. 臨時側リソースを停止/削除
-
-**DB(Firestore)は動かさない** → データ移行作業ゼロ。
+### A-3. 42 OAuth Application
+| 項目 | 値 |
+|---|---|
+| 取得元 | https://profile.intra.42.fr/oauth/applications |
+| `FT_API_CLIENT_ID` | `u-s4t2ud-b10fb627...`(UID。app の `constants.dart` にも入っている非機密値)|
+| `FT_API_CLIENT_SECRET` | アプリページの SECRET(秘密)|
+| **Redirect URI(必須登録)** | **`ft-intra42://callback`**(無いとログインが redirect mismatch で失敗)|
 
 ---
 
-## トラブルシューティング(SKILL より)
+## B. サーバ毎の構築(新サーバではここをやる)
 
-| 症状 | 原因 | 対策 |
+### B-1. Coolify をインストール
+対象サーバに Coolify を入れる。Traefik(`coolify-proxy`、host の 80/443)が立つ。
+
+### B-2. secret ファイルを **サーバ上に**置く(Coolify env は使わない)
+> ⚠️ **Coolify の env は値が 256 byte 上限**で、SA 鍵 JSON(約2.4KB）が入らない。
+> さらに env が空文字で注入される不調もあった。よって **secret は全てファイル方式**にする。
+
+```bash
+# サーバに SSH して
+sudo mkdir -p /opt/ft-intra-secrets
+
+# (1) SA 鍵 JSON を配置(ローカルから scp 等で運ぶ。例: gcloud compute scp)
+sudo mv /tmp/sa.json /opt/ft-intra-secrets/sa.json
+
+# (2) 42 creds を配置
+sudo tee /opt/ft-intra-secrets/ft.env >/dev/null <<'EOF'
+FT_API_CLIENT_ID=u-s4t2ud-b10fb627b168e381895af1d3e5c5e9f3ca43138b7fa88f538ec5b88f98c07150
+FT_API_CLIENT_SECRET=<42 の SECRET>
+EOF
+
+sudo chown root:root /opt/ft-intra-secrets/*
+sudo chmod 600 /opt/ft-intra-secrets/*
+```
+`docker-compose.yaml` がこの2ファイルを read-only mount する(repo に入るのは**パスだけ**):
+- `/opt/ft-intra-secrets/sa.json → /secrets/sa.json`(`GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json`)
+- `/opt/ft-intra-secrets/ft.env → /secrets/ft.env`(`entrypoint.sh` が `set -a; . /secrets/ft.env` で export)
+
+### B-3. Coolify でリソース作成
+1. **+ New Resource** → **Public Repository** → `https://github.com/guild-42/ft_intra_fastapi`(branch `main`)
+2. Build Pack: **Docker Compose**(repo の `docker-compose.yaml` を使用。`.yaml` 拡張子・`version:` なし・`coolify` network 必須)
+3. Strip Prefixes: **OFF**
+4. Coolify env は**設定不要**(secret は B-2 のファイル方式)。
+
+### B-4. Domains(Traefik ルート)
+リソース → **Domains** に `https://ft-intra.guild42.net` を設定 → **Deploy**。
+これで Traefik に `Host(ft-intra.guild42.net)` のルートができ、`:443` で backend を返す。
+
+### B-5. Cloudflare Tunnel(外部公開)
+Zero Trust → tunnel → **Public Hostname** に追加:
+| 項目 | 値 |
+|---|---|
+| Subdomain / Domain | `ft-intra` / `guild42.net` |
+| Service Type | **HTTPS** |
+| URL | **`localhost:443`** |
+| TLS → **No TLS Verify** | **ON** |
+
+> なぜ :443 か:`localhost:8000`=Coolify ダッシュボード、`localhost:80`=Traefik が https へ 302 リダイレクト(ループ)。
+> `localhost:443`=Traefik の https 入口が backend を直接返す。No TLS Verify は内部自己署名証明書を通すため
+> (公開側 TLS は Cloudflare が担当)。
+> 既存サービスが `:80` 統一なら、代わりに Coolify Domains を `http://ft-intra.guild42.net:8000` にして
+> tunnel を `http://localhost:80` でも可(http→https リダイレクトが消える)。
+
+### B-6. アプリ側
+`guild-42/ft_intra_app` の `lib/config/constants.dart` の `backendBaseUrl` を
+`https://ft-intra.guild42.net`(= Coolify ドメイン)にしてビルド。`--dart-define=BACKEND_URL=` でも可。
+
+---
+
+## C. リリース / 更新の手順(コード変更後)
+
+1. `backend/` を編集 → `guild-42/ft_intra_fastapi` に push
+2. Coolify → リソース → **Redeploy**(または **Stop → Deploy**)
+   - ⚠️ `docker restart` では env/設定が反映されない。必ず **Redeploy**(コンテナ再生成)。
+3. 下記 D で確認。
+
+> secret(SA 鍵 / 42 creds)を変える時は **サーバ上の `/opt/ft-intra-secrets/*` を直接書き換え** → Redeploy。
+
+---
+
+## D. 動作確認
+
+```bash
+# 1) /health が ok か(Firestore 接続込み)
+curl https://ft-intra.guild42.net/health
+# 期待: {"status":"ok","poller":{...},"valid_cookies":0,...}
+#   {"status":"error","detail":"...permissions..."} → SA に datastore.user が無い (A-2)
+#   /login にリダイレクト → tunnel が :8000(Coolify) を向いている (B-5)
+
+# 2) 42 client 認証が通るか(ダミー code)
+curl -X POST https://ft-intra.guild42.net/api/oauth/exchange \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"dummy","redirect_uri":"ft-intra42://callback"}'
+# 期待: "invalid_grant"  → client 認証 OK(code が無効なだけ。正常)
+#   "invalid_client"     → ft.env の creds が空/誤り (B-2)、または rotate 済みで旧値
+```
+
+ログ:
+```bash
+ssh <server> "sudo docker logs ft-intra-backend --tail 30"   # 現サーバ: gcloud compute ssh guild42-vm-01 --zone=asia-northeast1-b
+```
+
+> 補足: `docker exec ... echo $FT_API_CLIENT_ID` は **空に見える**が正常。`exec` は entrypoint を通らず
+> source 済みの値が見えないだけ。実際の uvicorn プロセスは保持している(D-2 の invalid_grant が証明)。
+
+---
+
+## E. サーバ移行チェックリスト(臨時 VPS → 本サーバ等)
+
+state(Firestore/FCM)はクラウド固定なので、**DB 移行は発生しない**。compute だけ移す:
+
+- [ ] 新サーバに Coolify インストール(B-1)
+- [ ] `/opt/ft-intra-secrets/sa.json` と `ft.env` を配置(B-2。鍵は旧サーバから運ぶか A-2 で再取得)
+- [ ] SA に `roles/datastore.user` があるか確認(A-2。プロジェクト側なので普通は残っている)
+- [ ] Coolify で `guild-42/ft_intra_fastapi` を接続・Deploy(B-3〜B-4)
+- [ ] Cloudflare Tunnel の Public Hostname を**新サーバの cloudflared**に向ける(B-5)
+      ／ または既存 tunnel のままなら DNS/tunnel の向き先を新サーバへ
+- [ ] `curl https://ft-intra.guild42.net/health` が ok(D)
+- [ ] **app は無変更**(ドメイン `ft-intra.guild42.net` が変わらなければ再ビルド不要)
+- [ ] 旧サーバのリソース停止
+
+---
+
+## F. ハマりどころ早見表(今回の実績)
+
+| 症状 | 原因 | 対処 |
 |---|---|---|
-| 302 リダイレクトループ | Domains が `https://` | `http://` に変更 |
-| 504 Gateway Timeout | coolify network 未接続 | compose の `networks: coolify` を確認 |
-| 接続タイムアウト | Domains にプロトコル無し | `http://` を付ける |
-| "services" section not found | compose に `version:` がある | 削除(本 compose は既に無し)|
-| リクエストが届かない | Domains のポート違い | コンテナ内部ポート `8000` を指定 |
-
-## 補足
-
-- `deploy.sh` は旧 Cloud Run 用(**現在は未使用**)。Coolify では使わない。参考用に残置。
-- secret は **git 禁止**。`.gitignore` で `.env` / `*-sa.json` 等を除外済み。
-- 42 client_secret は過去コードにベタ書きされていたので、**運用前にローテート推奨**
-  (42 Application 設定で再発行 → Coolify env を更新)。
-- デプロイ完了後、SKILL の「既存サービス一覧」に `ft-intra` 行を追記すること。
+| `/login` にリダイレクト | tunnel が `localhost:8000`(Coolify 本体)を向く | tunnel を `https://localhost:443` に (B-5) |
+| 302 ループ | Domains が `https://` で tunnel が `:80` | tunnel を `:443`、または Domains を `http://...:8000` |
+| `Docker Compose file not found .yaml` | ファイル名が `.yml` | `docker-compose.yaml` にする |
+| env 値が空で注入 / 256byte で弾かれる | Coolify env の制限・不調 | secret は**ファイル方式**(B-2) |
+| `insufficient authentication scopes` | SA 鍵が無く GCE 既定 SA にフォールバック | SA 鍵をマウント (B-2) |
+| `Missing or insufficient permissions` | SA に Firestore ロール無し | `roles/datastore.user` 付与 (A-2) + コンテナ再起動 |
+| `invalid_client` | 42 creds が空/誤り | `/opt/ft-intra-secrets/ft.env` を確認 |
+| ログイン redirect mismatch | 42 app に redirect_uri 未登録 | `ft-intra42://callback` を登録 (A-3) |
+| 設定変えたのに反映されない | `docker restart` した | Coolify から **Redeploy** |
