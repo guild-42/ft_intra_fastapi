@@ -1,10 +1,21 @@
 import os
 
+# Root log level for the whole backend. Set LOG_LEVEL=DEBUG to see every
+# Firestore read/write and request flow when debugging; INFO in normal ops.
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
 REVIEW_POLL_INTERVAL_SECONDS = int(os.getenv("REVIEW_POLL_INTERVAL_SECONDS", "300"))
 FRIEND_POLL_INTERVAL_SECONDS = int(os.getenv("FRIEND_POLL_INTERVAL_SECONDS", "120"))
 FT_API_BASE = "https://api.intra.42.fr/v2"
 INTRA_NOTIFICATIONS_URL = "https://profile.intra.42.fr/notifications"
+
+# 42 OAuth app credentials — read ONCE here (single source of truth). Previously
+# these were re-read via os.getenv in ft_client.py / routes_oauth.py /
+# review_poller.py independently; now those import from config.
+FT_API_CLIENT_ID = os.getenv("FT_API_CLIENT_ID", "")
+FT_API_CLIENT_SECRET = os.getenv("FT_API_CLIENT_SECRET", "")
+FT_TOKEN_URL = "https://api.intra.42.fr/oauth/token"
 
 # Campuses the friend poller scans (comma-separated env override). 26 = Tokyo.
 FRIEND_POLLER_CAMPUS_IDS = [

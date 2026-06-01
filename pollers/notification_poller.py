@@ -1,14 +1,11 @@
 import hashlib
 import logging
-from datetime import datetime
 
 import httpx
 from bs4 import BeautifulSoup
 
-import db
 from config import INTRA_NOTIFICATIONS_URL
 from pollers.base import BasePoller
-from push.fcm import send_push
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +69,15 @@ class NotificationPoller(BasePoller):
     name = "notification_poller"
     interval_seconds = 300
 
+    def __init__(self, cookie_repo, notification_repo, device_repo, state_repo, push):
+        self._cookies = cookie_repo
+        self._notifications = notification_repo
+        self._devices = device_repo
+        self._state = state_repo
+        self._push = push
+
     async def poll(self) -> list[dict]:
-        cookie = await db.get_valid_cookie()
+        cookie = await self._cookies.get_valid()
         if not cookie:
             logger.warning("No valid cookie available, skipping poll")
             return []
@@ -90,7 +94,7 @@ class NotificationPoller(BasePoller):
 
         if resp.status_code in (301, 302, 303, 307, 308):
             logger.warning("Cookie expired (HTTP %d redirect)", resp.status_code)
-            await db.invalidate_cookie(cookie)
+            await self._cookies.invalidate(cookie)
             raise CookieExpiredError(f"HTTP {resp.status_code}")
 
         if resp.status_code != 200:
@@ -102,7 +106,7 @@ class NotificationPoller(BasePoller):
     async def diff(self, new_items: list[dict]) -> list[dict]:
         changes = []
         for item in new_items:
-            is_new = await db.insert_notification(
+            is_new = await self._notifications.insert(
                 signature=item["signature"],
                 title=item["title"],
                 body=item["body"],
@@ -119,7 +123,7 @@ class NotificationPoller(BasePoller):
             # this global poller only fans out campus-wide announcements.
             if ntype not in ("evalpo_sale", "new_event"):
                 continue
-            devices = await db.get_devices_for_notification(ntype)
+            devices = await self._devices.get_for_notification(ntype)
             if not devices:
                 logger.info("No devices registered for %s, skipping push", ntype)
                 continue
@@ -128,7 +132,7 @@ class NotificationPoller(BasePoller):
             logger.info(
                 "Sending push for '%s' to %d devices", item["title"], len(tokens)
             )
-            await send_push(
+            await self._push.send(
                 tokens=tokens,
                 title=item["title"],
                 body=item["body"],
@@ -138,10 +142,10 @@ class NotificationPoller(BasePoller):
     async def run(self) -> None:
         try:
             await super().run()
-            await db.update_poller_state(self.name, success=True)
+            await self._state.update(self.name, success=True)
         except CookieExpiredError:
             logger.warning("All cookies expired. Polling paused until app provides new cookie.")
-            await db.update_poller_state(self.name, success=False)
+            await self._state.update(self.name, success=False)
         except Exception:
             logger.exception("NotificationPoller error")
-            await db.update_poller_state(self.name, success=False)
+            await self._state.update(self.name, success=False)

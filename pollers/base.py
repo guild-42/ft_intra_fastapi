@@ -1,4 +1,7 @@
+import logging
 from abc import ABC, abstractmethod
+
+logger = logging.getLogger(__name__)
 
 
 class BasePoller(ABC):
@@ -18,7 +21,11 @@ class BasePoller(ABC):
         ...
 
     async def run(self) -> None:
+        logger.info("%s: run start", self.name)
         items = await self.poll()
+        logger.info("%s: polled %d item(s)", self.name, len(items))
         changes = await self.diff(items)
+        logger.info("%s: %d change(s) after diff", self.name, len(changes))
         if changes:
             await self.notify(changes)
+        logger.info("%s: run done", self.name)

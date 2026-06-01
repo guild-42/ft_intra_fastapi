@@ -1,0 +1,22 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "cookies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "is_valid", "order": "ASCENDING" },
+        { "fieldPath": "expires_at", "order": "ASCENDING" },
+        { "fieldPath": "provided_at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "devices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pref_friend", "order": "ASCENDING" },
+        { "fieldPath": "friend_watch_ids", "arrayConfig": "CONTAINS" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

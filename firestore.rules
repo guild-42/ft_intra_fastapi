@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// ft_intra42 Firestore security rules.
+//
+// The Flutter app NEVER reads/writes Firestore directly (see DESIGN: Firestore
+// is server-only). Only the backend touches it, via the Firebase Admin SDK
+// (service account), which BYPASSES these rules entirely. Therefore the correct
+// posture is to deny all client access.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

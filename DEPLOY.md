@@ -59,7 +59,7 @@ gcloud iam service-accounts keys create sa.json \
 | 項目 | 値 |
 |---|---|
 | 取得元 | https://profile.intra.42.fr/oauth/applications |
-| `FT_API_CLIENT_ID` | `u-s4t2ud-b10fb627...`(UID。app の `constants.dart` にも入っている非機密値)|
+| `FT_API_CLIENT_ID` | `u-s4t2ud-4a065c9c...e5ea`(UID。app の `constants.dart` にも入っている非機密値)|
 | `FT_API_CLIENT_SECRET` | アプリページの SECRET(秘密)|
 | **Redirect URI(必須登録)** | **`ft-intra42://callback`**(無いとログインが redirect mismatch で失敗)|
 
@@ -83,7 +83,7 @@ sudo mv /tmp/sa.json /opt/ft-intra-secrets/sa.json
 
 # (2) 42 creds を配置
 sudo tee /opt/ft-intra-secrets/ft.env >/dev/null <<'EOF'
-FT_API_CLIENT_ID=u-s4t2ud-b10fb627b168e381895af1d3e5c5e9f3ca43138b7fa88f538ec5b88f98c07150
+FT_API_CLIENT_ID=u-s4t2ud-4a065c9caaecc660cbfc6a25c16142b54fdb125b9250f10da7c78163e08ae5ea
 FT_API_CLIENT_SECRET=<42 の SECRET>
 EOF
 

@@ -6,7 +6,6 @@ passed, so the Campus tab never shows stale presence.
 """
 import logging
 
-import db
 from config import CHECKOUT_SWEEP_INTERVAL_SECONDS
 from pollers.base import BasePoller
 
@@ -16,6 +15,10 @@ logger = logging.getLogger(__name__)
 class CheckoutSweeper(BasePoller):
     name = "checkout_sweeper"
     interval_seconds = CHECKOUT_SWEEP_INTERVAL_SECONDS
+
+    def __init__(self, checkin_repo, state_repo):
+        self._checkins = checkin_repo
+        self._state = state_repo
 
     # This poller doesn't fetch/diff/notify — it just expires stale rows. The
     # abstract methods are satisfied with no-ops and run() is overridden.
@@ -29,11 +32,13 @@ class CheckoutSweeper(BasePoller):
         return None
 
     async def run(self) -> None:
+        logger.debug("CheckoutSweeper: run start")
         try:
-            expired = await db.expire_stale_checkins()
+            expired = await self._checkins.expire_stale()
             if expired:
                 logger.info("CheckoutSweeper auto-checked-out %d stale check-ins", expired)
-            await db.update_poller_state(self.name, success=True)
+            await self._state.update(self.name, success=True)
+            logger.debug("CheckoutSweeper: run done")
         except Exception:
             logger.exception("CheckoutSweeper error")
-            await db.update_poller_state(self.name, success=False)
+            await self._state.update(self.name, success=False)

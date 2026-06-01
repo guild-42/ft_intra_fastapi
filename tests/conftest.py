@@ -1,7 +1,7 @@
 """Test scaffolding.
 
 The backend talks to Firestore (google-cloud-firestore), which isn't installed
-in every environment. We stub the import surface that ``db.py`` touches and
+in every environment. We stub the import surface that the repositories touch and
 provide a tiny in-memory fake client so check-in logic can be unit-tested
 without a real database or network.
 """

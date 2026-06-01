@@ -2,16 +2,20 @@
 
 The app fires these when the user crosses their campus geofence. Identity is
 NOT taken from the request body — the access_token is verified against
-api.intra.42.fr/v2/me (same anti-impersonation pattern as routes_register),
-and the resulting 42 user_id/login is what gets checked in.
+api.intra.42.fr/v2/me (IdentityVerifier), and the resulting 42 user_id/login is
+what gets checked in.
 """
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-import httpx
 
-import db
-from config import FT_API_BASE, CHECKIN_TTL_SECONDS
+from config import CHECKIN_TTL_SECONDS
+from deps import get_checkin_repo, get_identity
+from repositories.checkin_repo import CheckinRepository
+from services.identity import IdentityVerifier
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -24,23 +28,15 @@ class HeartbeatRequest(BaseModel):
     access_token: str
 
 
-async def _verify_token(access_token: str) -> dict:
-    """Resolve a verified 42 user from an OAuth access token. Raises 401 if the
-    token is invalid/expired."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{FT_API_BASE}/me",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid 42 access token")
-    return resp.json()
-
-
 @router.post("/api/checkin", status_code=201)
-async def checkin(req: CheckinRequest):
-    user = await _verify_token(req.access_token)
-    await db.upsert_checkin(
+async def checkin(
+    req: CheckinRequest,
+    identity: IdentityVerifier = Depends(get_identity),
+    repo: CheckinRepository = Depends(get_checkin_repo),
+):
+    logger.info("checkin: campus_id=%s (verifying token)", req.campus_id)
+    user = await identity.verify(req.access_token)
+    await repo.upsert(
         user_id=user["id"],
         login=user["login"],
         campus_id=req.campus_id,
@@ -56,22 +52,36 @@ async def checkin(req: CheckinRequest):
 
 
 @router.post("/api/checkout")
-async def checkout(req: CheckinRequest):
-    user = await _verify_token(req.access_token)
-    await db.set_checkout(user["id"], reason="manual")
+async def checkout(
+    req: CheckinRequest,
+    identity: IdentityVerifier = Depends(get_identity),
+    repo: CheckinRepository = Depends(get_checkin_repo),
+):
+    logger.info("checkout: (verifying token)")
+    user = await identity.verify(req.access_token)
+    await repo.set_checkout(user["id"], reason="manual")
     return {"status": "checked_out", "user_id": user["id"]}
 
 
 @router.post("/api/checkin/heartbeat")
-async def heartbeat(req: HeartbeatRequest):
-    user = await _verify_token(req.access_token)
-    ok = await db.heartbeat_checkin(user["id"], ttl_seconds=CHECKIN_TTL_SECONDS)
+async def heartbeat(
+    req: HeartbeatRequest,
+    identity: IdentityVerifier = Depends(get_identity),
+    repo: CheckinRepository = Depends(get_checkin_repo),
+):
+    user = await identity.verify(req.access_token)
+    ok = await repo.heartbeat(user["id"], ttl_seconds=CHECKIN_TTL_SECONDS)
+    logger.info("heartbeat: user_id=%s active=%s", user["id"], ok)
     return {"status": "ok" if ok else "not_checked_in", "user_id": user["id"]}
 
 
 @router.get("/api/checkins")
-async def list_checkins(campus_id: int | None = None):
-    rows = await db.list_active_checkins(campus_id=campus_id)
+async def list_checkins(
+    campus_id: int | None = None,
+    repo: CheckinRepository = Depends(get_checkin_repo),
+):
+    logger.info("list_checkins: campus_id=%s", campus_id)
+    rows = await repo.list_active(campus_id=campus_id)
     return {
         "campus_id": campus_id,
         "count": len(rows),

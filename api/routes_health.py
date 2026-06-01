@@ -1,18 +1,25 @@
+import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter
-import db
 
+from fastapi import APIRouter, Depends
+
+from deps import get_poller_state_repo
+from repositories.poller_state_repo import PollerStateRepository
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.get("/health")
-async def health():
+async def health(state: PollerStateRepository = Depends(get_poller_state_repo)):
     try:
-        poller_state = await db.get_poller_state("notification_poller")
-        valid_cookies = await db.count_collection("cookies", is_valid=True)
-        devices = await db.count_collection("devices")
-        active_checkins = await db.count_collection("checkins", is_active=True)
+        poller_state = await state.get("notification_poller")
+        valid_cookies = await state.count_collection("cookies", is_valid=True)
+        devices = await state.count_collection("devices")
+        active_checkins = await state.count_collection("checkins", is_active=True)
 
+        logger.debug("health: cookies=%d devices=%d active_checkins=%d",
+                     valid_cookies, devices, active_checkins)
         return {
             "status": "ok",
             "time": datetime.now(timezone.utc).isoformat(),
@@ -22,4 +29,5 @@ async def health():
             "active_checkins": active_checkins,
         }
     except Exception as e:
+        logger.exception("health check failed")
         return {"status": "error", "detail": str(e)}
