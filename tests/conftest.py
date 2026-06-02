@@ -49,6 +49,14 @@ def _ensure_firestore_stub():
 
 _ensure_firestore_stub()
 
+from google.cloud import firestore as _fs  # noqa: E402
+
+# DELETE_FIELD sentinel: present on the real lib; add it to the stub so repos
+# that delete fields (clear_token / clear_user_tokens) work under the fake too.
+if not hasattr(_fs, "DELETE_FIELD"):
+    _fs.DELETE_FIELD = object()
+_DELETE = _fs.DELETE_FIELD
+
 
 # ───── in-memory fake Firestore ─────
 
@@ -78,13 +86,15 @@ class FakeDocRef:
     async def set(self, doc, merge=False):
         coll = self._store.setdefault(self._coll, {})
         if merge and coll.get(self._id) is not None:
-            coll[self._id] = {**coll[self._id], **doc}
+            merged = {**coll[self._id], **doc}
         else:
-            coll[self._id] = dict(doc)
+            merged = dict(doc)
+        coll[self._id] = {k: v for k, v in merged.items() if v is not _DELETE}
 
     async def update(self, fields):
         coll = self._store.setdefault(self._coll, {})
-        coll[self._id] = {**(coll.get(self._id) or {}), **fields}
+        merged = {**(coll.get(self._id) or {}), **fields}
+        coll[self._id] = {k: v for k, v in merged.items() if v is not _DELETE}
 
 
 class FakeQuery:

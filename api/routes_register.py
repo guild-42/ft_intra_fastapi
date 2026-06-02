@@ -123,8 +123,12 @@ async def delete_credential(
         removed = await cookies.delete_user(device["user_id"])
         return {"status": "deleted", "type": "cookie", "removed": removed}
     if req.type == "token":
-        await devices.clear_token(req.fcm_token)
-        return {"status": "deleted", "type": "token"}
+        # Clear the token from ALL of this verified user's devices, not just the
+        # calling fcm: a rotated fcm leaves an orphaned doc that still holds the
+        # token (and pref_review=True), so a single-device clear looks like the
+        # delete failed and lets the poller keep using the stale token.
+        cleared = await devices.clear_user_tokens(user["id"])
+        return {"status": "deleted", "type": "token", "cleared": cleared}
     logger.warning("delete_credential: bad type=%r", req.type)
     raise HTTPException(status_code=400, detail="type must be 'cookie' or 'token'")
 

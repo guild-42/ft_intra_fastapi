@@ -114,6 +114,45 @@ class DeviceRepository(BaseRepository):
         logger.info("device.clear_token: cleared token fcm=%s", fcm_short(fcm_token))
         return True
 
+    async def clear_user_tokens(self, user_id) -> int:
+        """Remove the stored OAuth token from EVERY device owned by [user_id].
+
+        The user-facing "delete my token from server" must wipe the token
+        everywhere, not just the calling device: when an fcm_token rotates
+        (reinstall / token refresh) the old devices doc is orphaned but keeps
+        access_token/refresh_token + pref_review=True, so the review poller would
+        keep using that stale token. Clearing only the current fcm leaves it
+        behind — which looks like "delete didn't work" in Firestore.
+
+        Uses update() (the canonical field-delete) rather than set(merge=True).
+        Returns how many docs actually had a token removed.
+        """
+        query = self._db.collection("devices").where(
+            filter=firestore.FieldFilter("user_id", "==", user_id)
+        )
+        scanned = 0
+        cleared = 0
+        async for snap in query.stream():
+            scanned += 1
+            data = snap.to_dict() or {}
+            had_token = "access_token" in data or "refresh_token" in data
+            await snap.reference.update(
+                {
+                    "access_token": firestore.DELETE_FIELD,
+                    "refresh_token": firestore.DELETE_FIELD,
+                    "token_expires_at": firestore.DELETE_FIELD,
+                    "pref_review": False,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+            )
+            if had_token:
+                cleared += 1
+        logger.info(
+            "device.clear_user_tokens user_id=%s scanned=%d cleared=%d",
+            user_id, scanned, cleared,
+        )
+        return cleared
+
     async def get_with_token(self) -> list[dict]:
         """Devices that opted into review notifications AND have a stored token.
         Firestore can't filter on field existence, so presence is checked in
