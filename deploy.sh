@@ -29,6 +29,19 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
+# Coolify rebuilds from GitHub `main`, NOT the working tree — unpushed local
+# commits would silently deploy stale code. Refuse to deploy until pushed.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+  git fetch -q origin main 2>/dev/null || true
+  local_sha=$(git rev-parse HEAD 2>/dev/null || true)
+  remote_sha=$(git rev-parse origin/main 2>/dev/null || true)
+  if [ -n "$local_sha" ] && [ -n "$remote_sha" ] && [ "$local_sha" != "$remote_sha" ]; then
+    echo "ABORT: HEAD ($local_sha) != origin/main ($remote_sha)."
+    echo "Coolify deploys from GitHub main; push first:  git push origin main"
+    exit 1
+  fi
+fi
+
 echo "==> Triggering deploy of $COOLIFY_APP_UUID"
 duuid=$(api "$COOLIFY_BASE/api/v1/deploy?uuid=$COOLIFY_APP_UUID" \
   | jq_py "d['deployments'][0]['deployment_uuid']")
