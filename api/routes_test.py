@@ -86,25 +86,6 @@ async def test_notification(
     }
 
 
-@router.get("/api/test-token-state")
-async def test_token_state(devices: DeviceRepository = Depends(get_device_repo)):
-    """DIAGNOSTIC (temporary): which device docs still hold an OAuth token.
-    Returns booleans/counts only — never token values."""
-    out = []
-    async for snap in devices._db.collection("devices").stream():
-        d = snap.to_dict() or {}
-        out.append({
-            "fcm": str(snap.id)[:12] + "…",
-            "user_id": d.get("user_id"),
-            "has_access": "access_token" in d,
-            "has_refresh": "refresh_token" in d,
-            "pref_review": d.get("pref_review"),
-            "updated_at": str(d.get("updated_at")),
-        })
-    with_token = sum(1 for x in out if x["has_access"] or x["has_refresh"])
-    return {"total": len(out), "with_token": with_token, "devices": out}
-
-
 @router.post("/api/poll-now")
 async def poll_now(state: PollerStateRepository = Depends(get_poller_state_repo)):
     """Trigger the notification poller immediately (don't wait 5 min)."""

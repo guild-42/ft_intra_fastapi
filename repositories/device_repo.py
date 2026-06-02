@@ -147,6 +147,13 @@ class DeviceRepository(BaseRepository):
             )
             if had_token:
                 cleared += 1
+            # Re-read to PROVE the field deletion took (booleans only, no values).
+            after = (await snap.reference.get()).to_dict() or {}
+            logger.info(
+                "device.clear_user_tokens: fcm=%s had(acc=%s,ref=%s) after(acc=%s,ref=%s)",
+                fcm_short(snap.id), had_token, "refresh_token" in data,
+                "access_token" in after, "refresh_token" in after,
+            )
         logger.info(
             "device.clear_user_tokens user_id=%s scanned=%d cleared=%d",
             user_id, scanned, cleared,
