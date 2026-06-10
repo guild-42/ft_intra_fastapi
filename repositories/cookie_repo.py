@@ -23,17 +23,23 @@ class CookieRepository(BaseRepository):
             "expires_at": now + timedelta(days=14),
         })
 
-    async def get_valid(self) -> str | None:
+    async def _valid_docs(self) -> list[dict]:
+        """All non-expired valid cookie docs, newest first. The inequality +
+        order_by combination needs a composite index Firestore doesn't have
+        (the prod poller died on FailedPrecondition every run), so we query the
+        single indexed field and filter/sort in memory — the collection holds a
+        handful of docs at most."""
         now = datetime.now(timezone.utc)
-        query = (
-            self._db.collection("cookies")
-            .where(filter=firestore.FieldFilter("is_valid", "==", True))
-            .where(filter=firestore.FieldFilter("expires_at", ">", now))
-            .order_by("provided_at", direction=firestore.Query.DESCENDING)
-            .limit(1)
-        )
-        async for doc in query.stream():
-            data = doc.to_dict()
+        query = self._db.collection("cookies").where(
+            filter=firestore.FieldFilter("is_valid", "==", True))
+        docs = [d.to_dict() async for d in query.stream()]
+        docs = [d for d in docs if d.get("expires_at") and d["expires_at"] > now]
+        epoch = datetime.min.replace(tzinfo=timezone.utc)
+        docs.sort(key=lambda d: d.get("provided_at") or epoch, reverse=True)
+        return docs
+
+    async def get_valid(self) -> str | None:
+        for data in await self._valid_docs():
             logger.debug("cookie.get_valid: found valid cookie for login=%s",
                          data.get("login"))
             return decrypt_cookie(data.get("cookie"))
@@ -43,17 +49,9 @@ class CookieRepository(BaseRepository):
     async def get_valid_list(self) -> list[dict]:
         """All currently-valid cookies (one most-recent per user) for per-user
         scraping. Returns dicts with user_id, login, cookie."""
-        now = datetime.now(timezone.utc)
-        query = (
-            self._db.collection("cookies")
-            .where(filter=firestore.FieldFilter("is_valid", "==", True))
-            .where(filter=firestore.FieldFilter("expires_at", ">", now))
-            .order_by("provided_at", direction=firestore.Query.DESCENDING)
-        )
         seen: set = set()
         out: list[dict] = []
-        async for doc in query.stream():
-            data = doc.to_dict()
+        for data in await self._valid_docs():
             uid = data.get("user_id")
             if uid in seen:
                 continue
