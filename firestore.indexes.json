@@ -5,8 +5,8 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "is_valid", "order": "ASCENDING" },
-        { "fieldPath": "expires_at", "order": "ASCENDING" },
-        { "fieldPath": "provided_at", "order": "DESCENDING" }
+        { "fieldPath": "provided_at", "order": "DESCENDING" },
+        { "fieldPath": "expires_at", "order": "DESCENDING" }
       ]
     },
     {
