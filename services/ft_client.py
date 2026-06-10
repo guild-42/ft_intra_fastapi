@@ -62,16 +62,26 @@ class FtClient:
         logger.debug("ft_client.get_campus_active_locations: fetching campus=%d", campus_id)
         out: list[dict] = []
         async with httpx.AsyncClient(timeout=20) as client:
-            # Single page of 100 is plenty for active users at one campus.
-            resp = await client.get(
-                f"{FT_API_BASE}/campus/{campus_id}/locations",
-                params={"filter[active]": "true", "page[size]": 100},
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            if resp.status_code != 200:
-                logger.error("campus locations error %d", resp.status_code)
-                return []
-            out = resp.json()
+            # Busy campuses exceed one page of 100; follow page[number] until a
+            # short page. Capped at 5 pages (500 actives) as a runaway guard.
+            for page in range(1, 6):
+                resp = await client.get(
+                    f"{FT_API_BASE}/campus/{campus_id}/locations",
+                    params={
+                        "filter[active]": "true",
+                        "page[size]": 100,
+                        "page[number]": page,
+                    },
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code != 200:
+                    logger.error("campus locations error %d (page %d)",
+                                 resp.status_code, page)
+                    break
+                batch = resp.json()
+                out.extend(batch)
+                if len(batch) < 100:
+                    break
         logger.debug("ft_client.get_campus_active_locations: campus=%d → %d location(s)",
                      campus_id, len(out))
         return out

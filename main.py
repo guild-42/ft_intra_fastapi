@@ -84,6 +84,9 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
 
     notification, review, friend, sweeper = _build_pollers()
+    # Shared with /api/poll-now so a manual trigger reuses the same instance
+    # (a second instance risks double-pushing the same diff).
+    app.state.notification_poller = notification
 
     scheduler.add_job(
         notification.run,

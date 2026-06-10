@@ -132,12 +132,14 @@ class NotificationPoller(BasePoller):
             logger.info(
                 "Sending push for '%s' to %d devices", item["title"], len(tokens)
             )
-            await self._push.send(
+            sent = await self._push.send(
                 tokens=tokens,
                 title=item["title"],
                 body=item["body"],
                 data={"type": ntype, "source_date": item["source_date"] or ""},
             )
+            if sent:
+                await self._notifications.mark_pushed(item["signature"])
 
     async def run(self) -> None:
         try:

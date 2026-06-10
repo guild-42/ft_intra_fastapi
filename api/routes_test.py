@@ -3,7 +3,7 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import config
 from deps import (
@@ -97,26 +97,17 @@ async def test_notification(
 
 
 @router.post("/api/poll-now")
-async def poll_now(state: PollerStateRepository = Depends(get_poller_state_repo)):
+async def poll_now(
+    request: Request,
+    state: PollerStateRepository = Depends(get_poller_state_repo),
+):
     """Trigger the notification poller immediately (don't wait 5 min)."""
     logger.info("poll_now: manually triggering notification poller")
-    # Build the poller with the same injected dependencies main.py uses.
-    from deps import (
-        get_cookie_repo,
-        get_device_repo,
-        get_notification_repo,
-        get_poller_state_repo,
-        get_push,
-    )
-    from pollers.notification_poller import NotificationPoller
-
-    poller = NotificationPoller(
-        cookie_repo=get_cookie_repo(),
-        notification_repo=get_notification_repo(),
-        device_repo=get_device_repo(),
-        state_repo=get_poller_state_repo(),
-        push=get_push(),
-    )
+    # Reuse the scheduler's instance (set in main.py lifespan) — a fresh
+    # instance could double-push the same diff alongside the scheduled run.
+    poller = getattr(request.app.state, "notification_poller", None)
+    if poller is None:
+        raise HTTPException(status_code=503, detail="poller not started")
     await poller.run()
     poller_state = await state.get("notification_poller")
     logger.info("poll_now: poller finished, state=%s", poller_state)

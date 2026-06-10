@@ -28,6 +28,14 @@ class NotificationRepository(BaseRepository):
         logger.info("notification.insert: NEW sig=%s title=%r", signature, title)
         return True
 
+    async def mark_pushed(self, signature):
+        """Record when the push for this notification actually went out
+        (None means detected but never delivered — useful when debugging
+        missing notifications)."""
+        await self._db.collection("notifications").document(signature).set(
+            {"push_sent_at": datetime.now(timezone.utc)}, merge=True,
+        )
+
     async def get_page(self, page=1, per_page=20) -> list[dict]:
         query = (
             self._db.collection("notifications")
