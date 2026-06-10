@@ -22,6 +22,22 @@ FRIEND_POLLER_CAMPUS_IDS = [
     int(x) for x in os.getenv("FRIEND_POLLER_CAMPUS_IDS", "26").split(",") if x.strip()
 ]
 
+# Unauthenticated debug endpoints (/api/test-push, /api/test-notification,
+# /api/poll-now, /api/cookie) return 404 unless explicitly enabled. Keep OFF in
+# production; turn on locally when exercising the push pipeline by hand.
+DEBUG_ENDPOINTS_ENABLED = os.getenv("DEBUG_ENDPOINTS_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+# The client is a mobile app (no browser origin), so CORS is closed by default.
+# Set CORS_ALLOW_ORIGINS="https://example.com,https://other" if a web client
+# ever needs access.
+CORS_ALLOW_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()
+]
+
 # Location-based check-in: how long a check-in stays active without a heartbeat
 # (default 3h), and how often the sweeper auto-checks-out expired ones (10min).
 CHECKIN_TTL_SECONDS = int(os.getenv("CHECKIN_TTL_SECONDS", "10800"))

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import firestore_client
 from config import (
+    CORS_ALLOW_ORIGINS,
     LOG_LEVEL,
     POLL_INTERVAL_SECONDS,
     REVIEW_POLL_INTERVAL_SECONDS,
@@ -128,12 +129,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ft_intra42 backend", lifespan=lifespan)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Mobile-only client → no browser origins needed; closed unless explicitly
+# opened via CORS_ALLOW_ORIGINS (P0-4).
+if CORS_ALLOW_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOW_ORIGINS,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.middleware("http")

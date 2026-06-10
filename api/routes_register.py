@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from api.routes_test import require_debug_enabled
 from deps import get_cookie_repo, get_device_repo, get_identity
 from repositories.base import fcm_short
 from repositories.cookie_repo import CookieRepository
@@ -153,7 +154,14 @@ async def update_preferences(
     return {"status": "updated"}
 
 
-@router.post("/api/cookie", status_code=201)
+# Legacy unauthenticated endpoint — the app sends cookies through the verified
+# /api/register instead. Kept only as a manual debug tool behind the same gate
+# as routes_test.py.
+@router.post(
+    "/api/cookie",
+    status_code=201,
+    dependencies=[Depends(require_debug_enabled)],
+)
 async def register_cookie(
     req: CookieOnlyRequest,
     cookies: CookieRepository = Depends(get_cookie_repo),

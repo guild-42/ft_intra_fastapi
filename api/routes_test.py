@@ -3,8 +3,9 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
+import config
 from deps import (
     get_device_repo,
     get_notification_repo,
@@ -17,7 +18,16 @@ from repositories.poller_state_repo import PollerStateRepository
 from services.push import PushService
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+
+
+async def require_debug_enabled():
+    """These endpoints are unauthenticated; hide them (404, not 403, to avoid
+    advertising their existence) unless DEBUG_ENDPOINTS_ENABLED is set."""
+    if not config.DEBUG_ENDPOINTS_ENABLED:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+router = APIRouter(dependencies=[Depends(require_debug_enabled)])
 
 
 @router.post("/api/test-push")
