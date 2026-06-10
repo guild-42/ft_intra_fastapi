@@ -40,3 +40,17 @@ def test_debug_endpoints_reachable_when_enabled(monkeypatch):
     # proof the gate opened. test-push with no devices returns 200.
     resp = client.post("/api/test-push")
     assert resp.status_code != 404
+
+
+def test_test_push_rejects_unknown_type(monkeypatch):
+    monkeypatch.setattr(config, "DEBUG_ENDPOINTS_ENABLED", True)
+    client = _client()
+    assert client.post("/api/test-push?type=bogus").status_code == 400
+
+
+def test_test_push_review_payload_matches_poller(monkeypatch):
+    monkeypatch.setattr(config, "DEBUG_ENDPOINTS_ENABLED", True)
+    client = _client()
+    resp = client.post("/api/test-push?type=review")
+    assert resp.status_code == 200
+    assert resp.json()["type"] == "review"

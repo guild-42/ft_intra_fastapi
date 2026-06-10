@@ -30,34 +30,71 @@ async def require_debug_enabled():
 router = APIRouter(dependencies=[Depends(require_debug_enabled)])
 
 
+# One template per notification type, mirroring the exact data payload each
+# poller sends — so tapping the test push exercises the app's deep-link
+# routing (review → /evaluations, evalpo/event → /notifications,
+# friend_online → /campus).
+_PUSH_TEMPLATES = {
+    "evalpo_sale": {
+        "title": "Evaluation points sale",
+        "body": "[TEST] 50% off, today only!",
+        "data": lambda now: {"type": "evalpo_sale", "source_date": now},
+        "pref": "evalpo_sale",
+    },
+    "new_event": {
+        "title": "New event: Test workshop",
+        "body": "[TEST] Join us in cluster 1",
+        "data": lambda now: {"type": "new_event", "source_date": now},
+        "pref": "new_event",
+    },
+    "review": {
+        "title": "Evaluation scheduled",
+        "body": "[TEST] libft · you correct peer · tomorrow 10:00",
+        "data": lambda now: {"type": "review", "scale_team_id": "424242"},
+        "pref": "review",
+    },
+    "friend_online": {
+        "title": "Friend online",
+        "body": "[TEST] peer logged in at c1r2s3",
+        "data": lambda now: {"type": "friend_online", "user_id": "424242"},
+        "pref": "friend_online",
+    },
+}
+
+
 @router.post("/api/test-push")
 async def test_push(
+    type: str = "evalpo_sale",
     devices: DeviceRepository = Depends(get_device_repo),
     push: PushService = Depends(get_push),
 ):
-    """Send a test push notification to all registered devices.
-
-    Useful when actual intra notifications are unpredictable.
-    """
-    logger.info("test_push: dispatching test push to evalpo_sale devices")
-    device_list = await devices.get_for_notification("evalpo_sale")
+    """Send a test push of the given type (?type=evalpo_sale|new_event|review|
+    friend_online) to every device opted into that preference, with the same
+    data payload the real poller would send. Useful because real intra events
+    are unpredictable."""
+    template = _PUSH_TEMPLATES.get(type)
+    if template is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"type must be one of {sorted(_PUSH_TEMPLATES)}",
+        )
+    logger.info("test_push: dispatching %s test push", type)
+    device_list = await devices.get_for_notification(template["pref"])
     if not device_list:
-        logger.warning("test_push: no devices registered")
-        return {"status": "no_devices", "sent": 0}
+        logger.warning("test_push: no devices opted into %s", type)
+        return {"status": "no_devices", "type": type, "sent": 0}
 
+    now = datetime.now(timezone.utc).isoformat()
     tokens = [d["fcm_token"] for d in device_list]
-    title = "🧪 Test notification"
-    body = f"Backend → FCM → device push works! ({datetime.now(timezone.utc).isoformat()})"
-
     sent = await push.send(
         tokens=tokens,
-        title=title,
-        body=body,
-        data={"type": "test", "timestamp": datetime.now(timezone.utc).isoformat()},
+        title=template["title"],
+        body=template["body"],
+        data=template["data"](now),
     )
 
     logger.info("test_push: sent %d/%d", sent, len(tokens))
-    return {"status": "ok", "devices": len(tokens), "sent": sent}
+    return {"status": "ok", "type": type, "devices": len(tokens), "sent": sent}
 
 
 @router.post("/api/test-notification")
