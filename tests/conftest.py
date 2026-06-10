@@ -132,6 +132,12 @@ class FakeCollection:
     def __init__(self, store, coll):
         self._store, self._coll = store, coll
 
+    async def add(self, doc):
+        coll = self._store.setdefault(self._coll, {})
+        doc_id = f"auto{len(coll)}"
+        coll[doc_id] = dict(doc)
+        return None, FakeDocRef(self._store, self._coll, doc_id)
+
     def document(self, doc_id):
         return FakeDocRef(self._store, self._coll, str(doc_id))
 
