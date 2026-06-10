@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from google.cloud import firestore
 
 from repositories.base import BaseRepository
+from services.cookie_cipher import decrypt_cookie, encrypt_cookie
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class CookieRepository(BaseRepository):
         await self._db.collection("cookies").add({
             "user_id": user_id,
             "login": login,
-            "cookie": cookie,
+            "cookie": encrypt_cookie(cookie),
             "is_valid": True,
             "provided_at": now,
             "expires_at": now + timedelta(days=14),
@@ -35,7 +36,7 @@ class CookieRepository(BaseRepository):
             data = doc.to_dict()
             logger.debug("cookie.get_valid: found valid cookie for login=%s",
                          data.get("login"))
-            return data.get("cookie")
+            return decrypt_cookie(data.get("cookie"))
         logger.debug("cookie.get_valid: no valid cookie available")
         return None
 
@@ -60,16 +61,21 @@ class CookieRepository(BaseRepository):
             out.append({
                 "user_id": uid,
                 "login": data.get("login"),
-                "cookie": data.get("cookie"),
+                "cookie": decrypt_cookie(data.get("cookie")),
             })
         logger.debug("cookie.get_valid_list: %d distinct-user valid cookies", len(out))
         return out
 
     async def invalidate(self, cookie):
+        """Mark every doc holding this (plaintext) cookie invalid. Ciphertext
+        is nondeterministic, so we compare after decryption instead of an
+        equality query."""
         query = self._db.collection("cookies").where(
-            filter=firestore.FieldFilter("cookie", "==", cookie))
+            filter=firestore.FieldFilter("is_valid", "==", True))
         count = 0
         async for doc in query.stream():
+            if decrypt_cookie(doc.to_dict().get("cookie")) != cookie:
+                continue
             await doc.reference.update({"is_valid": False})
             count += 1
         logger.info("cookie.invalidate: invalidated %d cookie doc(s)", count)

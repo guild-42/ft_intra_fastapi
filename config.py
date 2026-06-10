@@ -22,6 +22,12 @@ FRIEND_POLLER_CAMPUS_IDS = [
     int(x) for x in os.getenv("FRIEND_POLLER_CAMPUS_IDS", "26").split(",") if x.strip()
 ]
 
+# Fernet key for encrypting intra session cookies at rest in Firestore (P0-5).
+# Generate once: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# and add COOKIE_ENC_KEY=... to the server's secret file (/opt/ft-intra-secrets/ft.env).
+# Unset → cookies are stored in plaintext (pre-key behavior, with a warning).
+COOKIE_ENC_KEY = os.getenv("COOKIE_ENC_KEY", "")
+
 # Unauthenticated debug endpoints (/api/test-push, /api/test-notification,
 # /api/poll-now, /api/cookie) return 404 unless explicitly enabled. Keep OFF in
 # production; turn on locally when exercising the push pipeline by hand.
