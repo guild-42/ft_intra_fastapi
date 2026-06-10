@@ -77,3 +77,14 @@ def test_clear_user_tokens_counts_only_token_bearing_docs():
     # Both scanned, but only the token-bearing one counts as cleared.
     assert cleared == 1
     assert "access_token" not in client.store["devices"]["with_token"]
+
+
+def test_delete_by_fcm_removes_device():
+    client = FakeClient()
+    client.store["devices"] = {
+        "tok_dead": {"user_id": 1, "fcm_token": "tok_dead"},
+        "tok_live": {"user_id": 2, "fcm_token": "tok_live"},
+    }
+    asyncio.run(DeviceRepository(client).delete_by_fcm("tok_dead"))
+    assert "tok_dead" not in client.store["devices"]
+    assert "tok_live" in client.store["devices"]

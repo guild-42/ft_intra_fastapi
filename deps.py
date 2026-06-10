@@ -37,7 +37,7 @@ def get_poller_state_repo() -> PollerStateRepository:
 # ───── services (process singletons: hold caches / global init) ─────
 
 _identity = IdentityVerifier()
-_push = PushService()
+_push = PushService(device_repo_factory=get_device_repo)
 _ft_client = FtClient()
 
 

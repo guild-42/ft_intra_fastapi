@@ -91,6 +91,9 @@ class FakeDocRef:
             merged = dict(doc)
         coll[self._id] = {k: v for k, v in merged.items() if v is not _DELETE}
 
+    async def delete(self):
+        self._store.get(self._coll, {}).pop(self._id, None)
+
     async def update(self, fields):
         coll = self._store.setdefault(self._coll, {})
         merged = {**(coll.get(self._id) or {}), **fields}

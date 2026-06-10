@@ -93,6 +93,12 @@ class DeviceRepository(BaseRepository):
             {"review_seeded": True}, merge=True,
         )
 
+    async def delete_by_fcm(self, fcm_token):
+        """Remove a device document entirely (FCM reported the token as
+        unregistered — app uninstalled or token rotated)."""
+        logger.info("device.delete_by_fcm fcm=%s", fcm_short(fcm_token))
+        await self._db.collection("devices").document(fcm_token).delete()
+
     async def clear_token(self, fcm_token) -> bool:
         """Remove the stored OAuth token from a device (review opt-out / delete).
         Returns False if the device is unknown."""
