@@ -1,4 +1,4 @@
-"""Debug-endpoint gate (P0-3): /api/test-* and /api/cookie must 404 unless
+"""Debug-endpoint gate (P0-3): /api/test-* and /api/poll-now must 404 unless
 DEBUG_ENDPOINTS_ENABLED is set."""
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -28,9 +28,6 @@ def test_debug_endpoints_hidden_by_default(monkeypatch):
     assert client.post("/api/test-push").status_code == 404
     assert client.post("/api/test-notification").status_code == 404
     assert client.post("/api/poll-now").status_code == 404
-    assert (
-        client.post("/api/cookie", json={"cookie": "x"}).status_code == 404
-    )
 
 
 def test_debug_endpoints_reachable_when_enabled(monkeypatch):

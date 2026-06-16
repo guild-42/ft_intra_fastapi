@@ -1,13 +1,13 @@
 """Register / credential routes against the in-memory FakeClient: identity
-binding on register, and the IDOR ownership check on DELETE /api/credentials
-(B-RG01–05)."""
+binding on register, and the IDOR ownership check on DELETE /api/credentials.
+The server stores no 42 cookie or token (doc_v2/10) — register only persists
+fcm_token + prefs, and credential delete removes the device doc."""
 from unittest.mock import AsyncMock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from deps import get_cookie_repo, get_device_repo, get_identity
-from repositories.cookie_repo import CookieRepository
+from deps import get_device_repo, get_identity
 from repositories.device_repo import DeviceRepository
 from tests.conftest import FakeClient
 
@@ -19,7 +19,6 @@ def make_client(identity, fake):
     app.include_router(rr.router)
     app.dependency_overrides[get_identity] = lambda: identity
     app.dependency_overrides[get_device_repo] = lambda: DeviceRepository(fake)
-    app.dependency_overrides[get_cookie_repo] = lambda: CookieRepository(fake)
     return TestClient(app)
 
 
@@ -34,17 +33,17 @@ def test_register_binds_device_to_verified_identity():
     fake = FakeClient()
     client = make_client(_identity(42, "me"), fake)
     resp = client.post("/api/register", json={
-        "fcm_token": "tokA", "access_token": "acc", "cookie": "session-cookie",
+        "fcm_token": "tokA", "access_token": "acc",
     })
     assert resp.status_code == 201
     assert resp.json()["user_id"] == 42
     device = fake.store["devices"]["tokA"]
     assert device["user_id"] == 42
     assert device["login"] == "me"
-    # cookie stored under the verified user
-    assert any(
-        c.get("user_id") == 42 for c in fake.store.get("cookies", {}).values()
-    )
+    # The 42 token is never persisted server-side.
+    assert "access_token" not in device
+    assert "refresh_token" not in device
+    assert "cookies" not in fake.store
 
 
 def test_register_rejects_invalid_token():
@@ -62,42 +61,35 @@ def test_register_rejects_invalid_token():
 
 
 def test_delete_credential_owner_mismatch_is_404():
-    """B-RG03 (IDOR): a valid token of user B cannot delete user A's data,
+    """B-RG03 (IDOR): a valid token of user B cannot delete user A's device,
     and the response must not confirm the device exists."""
     fake = FakeClient()
     fake.store["devices"] = {
-        "tokA": {"user_id": 42, "fcm_token": "tokA", "access_token": "x"},
+        "tokA": {"user_id": 42, "fcm_token": "tokA"},
     }
     client = make_client(_identity(user_id=999, login="attacker"), fake)
     resp = client.request("DELETE", "/api/credentials", json={
-        "type": "token", "fcm_token": "tokA", "access_token": "attacker-token",
+        "fcm_token": "tokA", "access_token": "attacker-token",
     })
     assert resp.status_code == 404
-    assert fake.store["devices"]["tokA"]["access_token"] == "x"
+    assert "tokA" in fake.store["devices"]
 
 
-def test_delete_credential_token_clears_all_user_devices():
-    """B-RG04: token delete clears every device of the verified user (an
-    orphaned doc from a rotated fcm token must not keep the token alive)."""
+def test_delete_credential_removes_owned_device():
+    """B-RG04: the verified owner's device doc is deleted (full server-side
+    footprint removal)."""
     fake = FakeClient()
     fake.store["devices"] = {
-        "tokA": {"user_id": 42, "fcm_token": "tokA",
-                 "access_token": "x", "refresh_token": "r", "pref_review": True},
-        "tokOld": {"user_id": 42, "fcm_token": "tokOld",
-                   "access_token": "x2", "refresh_token": "r2",
-                   "pref_review": True},
-        "tokOther": {"user_id": 7, "fcm_token": "tokOther",
-                     "access_token": "y", "pref_review": True},
+        "tokA": {"user_id": 42, "fcm_token": "tokA"},
+        "tokOther": {"user_id": 7, "fcm_token": "tokOther"},
     }
     client = make_client(_identity(user_id=42), fake)
     resp = client.request("DELETE", "/api/credentials", json={
-        "type": "token", "fcm_token": "tokA", "access_token": "acc",
+        "fcm_token": "tokA", "access_token": "acc",
     })
     assert resp.status_code == 200
-    assert resp.json()["cleared"] == 2
-    assert "access_token" not in fake.store["devices"]["tokA"]
-    assert "access_token" not in fake.store["devices"]["tokOld"]
-    assert fake.store["devices"]["tokOther"]["access_token"] == "y"
+    assert "tokA" not in fake.store["devices"]
+    assert "tokOther" in fake.store["devices"]
 
 
 def test_preferences_unknown_device_is_404():

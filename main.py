@@ -10,14 +10,13 @@ import firestore_client
 from config import (
     CORS_ALLOW_ORIGINS,
     LOG_LEVEL,
-    POLL_INTERVAL_SECONDS,
-    REVIEW_POLL_INTERVAL_SECONDS,
+    EVENT_POLL_INTERVAL_SECONDS,
+    EVAL_WAKE_INTERVAL_SECONDS,
     FRIEND_POLL_INTERVAL_SECONDS,
     CHECKOUT_SWEEP_INTERVAL_SECONDS,
 )
 from deps import (
     get_checkin_repo,
-    get_cookie_repo,
     get_device_repo,
     get_ft_client,
     get_notification_repo,
@@ -32,8 +31,8 @@ from api.routes_test import router as test_router
 from api.routes_checkin import router as checkin_router
 from api.routes_legal import router as legal_router
 from api.routes_landing import router as landing_router
-from pollers.notification_poller import NotificationPoller
-from pollers.review_poller import ReviewPoller
+from pollers.events_poller import EventsPoller
+from pollers.eval_wake_poller import EvalWakePoller
 from pollers.friend_poller import FriendPoller
 from pollers.checkout_sweeper import CheckoutSweeper
 
@@ -53,17 +52,20 @@ scheduler = AsyncIOScheduler()
 
 def _build_pollers():
     """Construct each poller with its injected repositories/services. Repos wrap
-    the shared Firestore client; push/ft_client are process singletons."""
-    notification = NotificationPoller(
-        cookie_repo=get_cookie_repo(),
+    the shared Firestore client; push/ft_client are process singletons.
+
+    No cookie scraping and no server-held 42 token (doc_v2/10): events come from
+    the public API, eval is a content-less wake push, friend uses public
+    locations."""
+    events = EventsPoller(
         notification_repo=get_notification_repo(),
         device_repo=get_device_repo(),
         state_repo=get_poller_state_repo(),
+        ft_client=get_ft_client(),
         push=get_push(),
     )
-    review = ReviewPoller(
+    eval_wake = EvalWakePoller(
         device_repo=get_device_repo(),
-        notification_repo=get_notification_repo(),
         state_repo=get_poller_state_repo(),
         push=get_push(),
     )
@@ -77,7 +79,7 @@ def _build_pollers():
         checkin_repo=get_checkin_repo(),
         state_repo=get_poller_state_repo(),
     )
-    return notification, review, friend, sweeper
+    return events, eval_wake, friend, sweeper
 
 
 @asynccontextmanager
@@ -85,23 +87,22 @@ async def lifespan(app: FastAPI):
     await firestore_client.init_db()
     logger.info("Database initialized")
 
-    notification, review, friend, sweeper = _build_pollers()
-    # Shared with /api/poll-now so a manual trigger reuses the same instance
-    # (a second instance risks double-pushing the same diff).
-    app.state.notification_poller = notification
+    events, eval_wake, friend, sweeper = _build_pollers()
+    # Shared with /api/poll-now so a manual trigger reuses the same instance.
+    app.state.events_poller = events
 
     scheduler.add_job(
-        notification.run,
+        events.run,
         "interval",
-        seconds=POLL_INTERVAL_SECONDS,
-        id="notification_poller",
+        seconds=EVENT_POLL_INTERVAL_SECONDS,
+        id="events_poller",
         replace_existing=True,
     )
     scheduler.add_job(
-        review.run,
+        eval_wake.run,
         "interval",
-        seconds=REVIEW_POLL_INTERVAL_SECONDS,
-        id="review_poller",
+        seconds=EVAL_WAKE_INTERVAL_SECONDS,
+        id="eval_wake_poller",
         replace_existing=True,
     )
     scheduler.add_job(
@@ -120,9 +121,9 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     logger.info(
-        "Scheduler started (notif=%ds, review=%ds, friend=%ds)",
-        POLL_INTERVAL_SECONDS,
-        REVIEW_POLL_INTERVAL_SECONDS,
+        "Scheduler started (events=%ds, eval_wake=%ds, friend=%ds)",
+        EVENT_POLL_INTERVAL_SECONDS,
+        EVAL_WAKE_INTERVAL_SECONDS,
         FRIEND_POLL_INTERVAL_SECONDS,
     )
 

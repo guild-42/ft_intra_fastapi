@@ -43,13 +43,15 @@ is not affiliated with or endorsed by École&nbsp;42 / the 42 Network.</p>
 Depending on the features you enable, the following data is processed:</p>
 <table>
 <tr><th>Data</th><th>When</th><th>Why</th></tr>
-<tr><td>42 OAuth tokens (access + refresh)</td><td>Only if you enable <em>review notifications</em></td><td>The server polls your evaluations on your behalf (the 42 API has no push)</td></tr>
-<tr><td>42 intra session cookie</td><td>Only if you enable <em>cookie-based notifications</em></td><td>The server reads your intra notifications page (eval-point sales, events, friends)</td></tr>
 <tr><td>FCM push token</td><td>When notifications are on</td><td>To deliver push notifications to your device</td></tr>
 <tr><td>42 user id / login</td><td>When using the app</td><td>To identify you for presence, check-in and notifications</td></tr>
-<tr><td>Precise location</td><td>Only if you enable <em>location check-in</em></td><td>To detect arrival/departure at your campus (geofence) and mark you present</td></tr>
 <tr><td>Friend watch list (42 user ids only)</td><td>When you enable per-friend login alerts</td><td>To notify you when a watched friend logs in</td></tr>
 </table>
+<p>Your <strong>42 OAuth token stays on your device</strong> (iOS Keychain) and
+is never stored on the server. For evaluation notifications the server only sends
+a content-less "wake" signal; your device then reads your own data from the 42
+API and shows the notification locally. The server holds no 42 session cookie and
+does no scraping.</p>
 <p>We do <strong>not</strong> collect contacts, photos, advertising
 identifiers, browsing history, or any data for advertising/tracking.</p>
 
@@ -57,10 +59,10 @@ identifiers, browsing history, or any data for advertising/tracking.</p>
 <ul>
 <li>Credentials and tokens are used <strong>only</strong> to generate your
 notifications and presence — nothing else.</li>
-<li>Server-side data is stored in <strong>Google Firestore</strong> (server-only
-access; not readable by other app users). Stored intra cookies are
-<strong>encrypted at rest</strong>.</li>
-<li>On your device, tokens are kept in the iOS Keychain (secure storage).</li>
+<li>Server-side data (your FCM token, prefs and friend list of 42 ids) is stored
+in <strong>Google Firestore</strong> (server-only access; not readable by other
+app users). No 42 token or session cookie is stored on the server.</li>
+<li>On your device, your 42 token is kept in the iOS Keychain (secure storage).</li>
 <li>Friend <strong>nicknames</strong> and Discord links you set stay
 <strong>on your device only</strong> and are never sent to the server.</li>
 </ul>
@@ -77,9 +79,9 @@ access; not readable by other app users). Stored intra cookies are
 <ul>
 <li>All data sharing is <strong>off by default</strong>. Each notification type
 is opt-in with an explicit consent screen.</li>
-<li>You can <strong>delete your cookie and OAuth token from the server at any
-time</strong> in Settings → "My data (server)", and turn off any notification or
-check-in.</li>
+<li>You can <strong>delete your server-side registration at any time</strong> in
+Settings → "My data (server)", and turn off any notification or check-in. Your
+42 token can be removed by logging out (it only ever lived on your device).</li>
 <li>To request full deletion of any remaining data, contact us at the email above.</li>
 </ul>
 

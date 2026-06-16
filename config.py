@@ -4,11 +4,16 @@ import os
 # Firestore read/write and request flow when debugging; INFO in normal ops.
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
-POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "300"))
-REVIEW_POLL_INTERVAL_SECONDS = int(os.getenv("REVIEW_POLL_INTERVAL_SECONDS", "300"))
+# Events poller: how often to fetch a campus's events via the official public
+# API (app token) and diff for new ones.
+EVENT_POLL_INTERVAL_SECONDS = int(os.getenv("EVENT_POLL_INTERVAL_SECONDS", "600"))
 FRIEND_POLL_INTERVAL_SECONDS = int(os.getenv("FRIEND_POLL_INTERVAL_SECONDS", "120"))
+# Eval "alarm clock": how often the server sends a content-less wake push to
+# pref_review devices so they fetch their own /me/scale_teams (the server never
+# holds the user token; see doc_v2/10). iOS throttles silent push, so this is a
+# best-effort, non-realtime nudge.
+EVAL_WAKE_INTERVAL_SECONDS = int(os.getenv("EVAL_WAKE_INTERVAL_SECONDS", "1800"))
 FT_API_BASE = "https://api.intra.42.fr/v2"
-INTRA_NOTIFICATIONS_URL = "https://profile.intra.42.fr/notifications"
 
 # 42 OAuth app credentials — read ONCE here (single source of truth). Previously
 # these were re-read via os.getenv in ft_client.py / routes_oauth.py /
@@ -17,19 +22,17 @@ FT_API_CLIENT_ID = os.getenv("FT_API_CLIENT_ID", "")
 FT_API_CLIENT_SECRET = os.getenv("FT_API_CLIENT_SECRET", "")
 FT_TOKEN_URL = "https://api.intra.42.fr/oauth/token"
 
-# Campuses the friend poller scans (comma-separated env override). 26 = Tokyo.
+# Campuses the friend + events pollers scan (comma-separated env override).
+# 26 = Tokyo. Kept under the old name for env compatibility.
 FRIEND_POLLER_CAMPUS_IDS = [
     int(x) for x in os.getenv("FRIEND_POLLER_CAMPUS_IDS", "26").split(",") if x.strip()
 ]
-
-# Fernet key for encrypting intra session cookies at rest in Firestore (P0-5).
-# Generate once: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# and add COOKIE_ENC_KEY=... to the server's secret file (/opt/ft-intra-secrets/ft.env).
-# Unset → cookies are stored in plaintext (pre-key behavior, with a warning).
-COOKIE_ENC_KEY = os.getenv("COOKIE_ENC_KEY", "")
+EVENT_POLLER_CAMPUS_IDS = [
+    int(x) for x in os.getenv("EVENT_POLLER_CAMPUS_IDS", "26").split(",") if x.strip()
+]
 
 # Unauthenticated debug endpoints (/api/test-push, /api/test-notification,
-# /api/poll-now, /api/cookie) return 404 unless explicitly enabled. Keep OFF in
+# /api/poll-now) return 404 unless explicitly enabled. Keep OFF in
 # production; turn on locally when exercising the push pipeline by hand.
 DEBUG_ENDPOINTS_ENABLED = os.getenv("DEBUG_ENDPOINTS_ENABLED", "false").lower() in (
     "1",

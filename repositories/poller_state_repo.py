@@ -31,7 +31,7 @@ class PollerStateRepository(BaseRepository):
 
     async def count_collection(self, name: str, **filters) -> int:
         """Returns count of documents in a collection with optional filters.
-        Used by the health endpoint to report cookie/device/checkin totals."""
+        Used by the health endpoint to report device/checkin totals."""
         query = self._db.collection(name)
         for field, value in filters.items():
             query = query.where(filter=firestore.FieldFilter(field, "==", value))

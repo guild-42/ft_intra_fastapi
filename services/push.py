@@ -74,6 +74,44 @@ class PushService:
             logger.exception("FCM send failed")
             return 0
 
+    async def send_silent(self, tokens: list[str], data: dict[str, str]) -> int:
+        """Send a content-less, data-only push (no notification banner). Used by
+        the eval "alarm clock": the device wakes, fetches its own /me data with
+        its locally-stored token and posts a local notification. The server never
+        sees 42 data. iOS requires content-available=1 + priority 5 for a silent
+        push; FCM throttles these, so delivery is best-effort."""
+        logger.info("push.send_silent: %d token(s) data=%r", len(tokens), data)
+        self._init_firebase()
+        if not self._initialized:
+            logger.warning("Firebase not initialized, skipping silent push")
+            return 0
+
+        from firebase_admin import messaging
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            data=data or {},
+            apns=messaging.APNSConfig(
+                headers={"apns-priority": "5", "apns-push-type": "background"},
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(content_available=True),
+                ),
+            ),
+            android=messaging.AndroidConfig(priority="high"),
+        )
+        try:
+            response = await asyncio.to_thread(
+                messaging.send_each_for_multicast, message
+            )
+            logger.info("FCM silent: %d success, %d failure",
+                        response.success_count, response.failure_count)
+            if response.failure_count:
+                await self._cleanup_invalid(messaging, tokens, response)
+            return response.success_count
+        except Exception:
+            logger.exception("FCM silent send failed")
+            return 0
+
     async def _cleanup_invalid(self, messaging, tokens, response):
         """Delete devices whose FCM token FCM reports as unregistered
         (app uninstalled / token rotated) so we stop pushing to them."""

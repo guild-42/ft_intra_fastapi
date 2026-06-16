@@ -52,6 +52,29 @@ class FtClient:
                     data.get("expires_in", 7200))
         return self._token
 
+    async def get_campus_events(self, campus_id: int) -> list[dict]:
+        """Upcoming events for a campus (public data, app token). Sorted by most
+        recently created so the diff catches newly-announced events. One page of
+        100 is plenty for event volume."""
+        token = await self.get_app_token()
+        if not token:
+            logger.warning("ft_client.get_campus_events: no app token, returning []")
+            return []
+        logger.debug("ft_client.get_campus_events: fetching campus=%d", campus_id)
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{FT_API_BASE}/campus/{campus_id}/events",
+                params={"page[size]": 100, "sort": "-created_at"},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code != 200:
+            logger.error("campus events error %d", resp.status_code)
+            return []
+        events = resp.json()
+        logger.debug("ft_client.get_campus_events: campus=%d → %d event(s)",
+                     campus_id, len(events))
+        return events
+
     async def get_campus_active_locations(self, campus_id: int) -> list[dict]:
         """Active (currently-logged-in) locations for a campus. Returns the raw
         location dicts; each has a nested ``user`` with ``id`` and ``login``."""

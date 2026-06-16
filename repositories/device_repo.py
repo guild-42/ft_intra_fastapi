@@ -1,5 +1,7 @@
-"""Device (FCM endpoint + preferences + optional OAuth token) persistence.
-Keyed by fcm_token."""
+"""Device (FCM endpoint + notification preferences) persistence, keyed by
+fcm_token. The server intentionally stores NO 42 OAuth token (doc_v2/10): the
+user token lives only on the device, so this repo holds fcm_token + prefs +
+consent record."""
 import logging
 from datetime import datetime, timezone
 
@@ -23,15 +25,13 @@ class DeviceRepository(BaseRepository):
                      pref_evalpo=True, pref_event=True,
                      pref_review=True, pref_friend=True,
                      friend_watch_ids=None,
-                     access_token=None, refresh_token=None,
-                     token_expires_at=None,
                      consent_version=None, consented_at=None):
         logger.info(
             "device.upsert user_id=%s login=%s fcm=%s platform=%s prefs="
-            "(evalpo=%s,event=%s,review=%s,friend=%s) watch_ids=%d has_token=%s",
+            "(evalpo=%s,event=%s,review=%s,friend=%s) watch_ids=%d",
             user_id, login, fcm_short(fcm_token), platform,
             pref_evalpo, pref_event, pref_review, pref_friend,
-            len(friend_watch_ids or []), refresh_token is not None,
+            len(friend_watch_ids or []),
         )
         now = datetime.now(timezone.utc)
         doc = {
@@ -47,12 +47,6 @@ class DeviceRepository(BaseRepository):
             "friend_watch_ids": friend_watch_ids or [],
             "updated_at": now,
         }
-        # Token is only stored on the review opt-in path (refresh_token present), so
-        # a cookie-only register never persists a review credential.
-        if refresh_token is not None:
-            doc["access_token"] = access_token
-            doc["refresh_token"] = refresh_token
-            doc["token_expires_at"] = token_expires_at
         if consent_version is not None:
             doc["consent_version"] = consent_version
             doc["consented_at"] = consented_at
@@ -70,119 +64,11 @@ class DeviceRepository(BaseRepository):
         logger.debug("device.get_by_fcm fcm=%s found=%s", fcm_short(fcm_token), snap.exists)
         return snap.to_dict() if snap.exists else None
 
-    async def update_token(self, fcm_token, access_token, token_expires_at,
-                           refresh_token=None):
-        """Persist a refreshed access token (called by the review poller). The 42
-        refresh_token can rotate on use, so update it too when provided."""
-        logger.info("device.update_token fcm=%s rotate_refresh=%s",
-                    fcm_short(fcm_token), refresh_token is not None)
-        update = {
-            "access_token": access_token,
-            "token_expires_at": token_expires_at,
-            "updated_at": datetime.now(timezone.utc),
-        }
-        if refresh_token is not None:
-            update["refresh_token"] = refresh_token
-        await self._db.collection("devices").document(fcm_token).set(update, merge=True)
-
-    async def mark_review_seeded(self, fcm_token):
-        """Mark a device's review baseline as captured so the first poll after
-        opt-in records existing scale_teams without pushing a backlog of alerts."""
-        logger.info("device.mark_review_seeded fcm=%s", fcm_short(fcm_token))
-        await self._db.collection("devices").document(fcm_token).set(
-            {"review_seeded": True}, merge=True,
-        )
-
     async def delete_by_fcm(self, fcm_token):
         """Remove a device document entirely (FCM reported the token as
         unregistered — app uninstalled or token rotated)."""
         logger.info("device.delete_by_fcm fcm=%s", fcm_short(fcm_token))
         await self._db.collection("devices").document(fcm_token).delete()
-
-    async def clear_token(self, fcm_token) -> bool:
-        """Remove the stored OAuth token from a device (review opt-out / delete).
-        Returns False if the device is unknown."""
-        ref = self._db.collection("devices").document(fcm_token)
-        snap = await ref.get()
-        if not snap.exists:
-            logger.warning("device.clear_token: unknown device fcm=%s", fcm_short(fcm_token))
-            return False
-        await ref.set(
-            {
-                "access_token": firestore.DELETE_FIELD,
-                "refresh_token": firestore.DELETE_FIELD,
-                "token_expires_at": firestore.DELETE_FIELD,
-                "pref_review": False,
-                "updated_at": datetime.now(timezone.utc),
-            },
-            merge=True,
-        )
-        logger.info("device.clear_token: cleared token fcm=%s", fcm_short(fcm_token))
-        return True
-
-    async def clear_user_tokens(self, user_id) -> int:
-        """Remove the stored OAuth token from EVERY device owned by [user_id].
-
-        The user-facing "delete my token from server" must wipe the token
-        everywhere, not just the calling device: when an fcm_token rotates
-        (reinstall / token refresh) the old devices doc is orphaned but keeps
-        access_token/refresh_token + pref_review=True, so the review poller would
-        keep using that stale token. Clearing only the current fcm leaves it
-        behind — which looks like "delete didn't work" in Firestore.
-
-        Uses update() (the canonical field-delete) rather than set(merge=True).
-        Returns how many docs actually had a token removed.
-        """
-        query = self._db.collection("devices").where(
-            filter=firestore.FieldFilter("user_id", "==", user_id)
-        )
-        scanned = 0
-        cleared = 0
-        async for snap in query.stream():
-            scanned += 1
-            data = snap.to_dict() or {}
-            had_token = "access_token" in data or "refresh_token" in data
-            await snap.reference.update(
-                {
-                    "access_token": firestore.DELETE_FIELD,
-                    "refresh_token": firestore.DELETE_FIELD,
-                    "token_expires_at": firestore.DELETE_FIELD,
-                    "pref_review": False,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            )
-            if had_token:
-                cleared += 1
-            # Re-read to PROVE the field deletion took (booleans only, no values).
-            after = (await snap.reference.get()).to_dict() or {}
-            logger.info(
-                "device.clear_user_tokens: fcm=%s had(acc=%s,ref=%s) after(acc=%s,ref=%s)",
-                fcm_short(snap.id), had_token, "refresh_token" in data,
-                "access_token" in after, "refresh_token" in after,
-            )
-        logger.info(
-            "device.clear_user_tokens user_id=%s scanned=%d cleared=%d",
-            user_id, scanned, cleared,
-        )
-        return cleared
-
-    async def get_with_token(self) -> list[dict]:
-        """Devices that opted into review notifications AND have a stored token.
-        Firestore can't filter on field existence, so presence is checked in
-        memory after the equality filter."""
-        query = self._db.collection("devices").where(
-            filter=firestore.FieldFilter("pref_review", "==", True)
-        )
-        out: list[dict] = []
-        scanned = 0
-        async for doc in query.stream():
-            scanned += 1
-            d = doc.to_dict()
-            if d.get("access_token") and d.get("refresh_token"):
-                out.append(d)
-        logger.debug("device.get_with_token: %d/%d pref_review devices have tokens",
-                     len(out), scanned)
-        return out
 
     async def update_prefs(self, fcm_token, **fields) -> bool:
         """Partial update of a device's preference fields, keyed by fcm_token.

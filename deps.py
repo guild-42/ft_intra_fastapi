@@ -4,7 +4,6 @@ same factories. Services that hold caches/connections (push, ft_client) are
 process singletons; repositories are cheap wrappers created per call."""
 from firestore_client import get_client
 from repositories.checkin_repo import CheckinRepository
-from repositories.cookie_repo import CookieRepository
 from repositories.device_repo import DeviceRepository
 from repositories.notification_repo import NotificationRepository
 from repositories.poller_state_repo import PollerStateRepository
@@ -16,10 +15,6 @@ from services.push import PushService
 
 def get_device_repo() -> DeviceRepository:
     return DeviceRepository(get_client())
-
-
-def get_cookie_repo() -> CookieRepository:
-    return CookieRepository(get_client())
 
 
 def get_notification_repo() -> NotificationRepository:

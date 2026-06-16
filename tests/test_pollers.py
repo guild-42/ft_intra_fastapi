@@ -1,14 +1,10 @@
-"""Poller logic without network/Firestore: HTML parsing + classification for
-the global notification poller, and the seed-then-push lifecycle of the review
-poller (B-RP01–04)."""
+"""Poller logic without network/Firestore: the events poller's diff+push of
+public campus events, and the eval "alarm clock" wake push. No cookie scraping
+and no server-held 42 token (doc_v2/10)."""
 import asyncio
 
-from pollers.notification_poller import (
-    NotificationPoller,
-    classify_notification,
-    parse_notifications_html,
-)
-from pollers.review_poller import ReviewPoller
+from pollers.events_poller import EventsPoller
+from pollers.eval_wake_poller import EvalWakePoller
 
 
 # ───── fakes ─────
@@ -32,180 +28,101 @@ class FakeNotificationRepo:
 class FakeDeviceRepo:
     def __init__(self, devices=None):
         self.devices = devices or []
-        self.seeded = []
-        self.cleared = []
 
     async def get_for_notification(self, ntype):
         return self.devices
 
-    async def mark_review_seeded(self, fcm_token):
-        self.seeded.append(fcm_token)
-        for d in self.devices:
-            if d["fcm_token"] == fcm_token:
-                d["review_seeded"] = True
 
-    async def clear_token(self, fcm_token):
-        self.cleared.append(fcm_token)
-        return True
+class FakeState:
+    def __init__(self):
+        self.updates = []
+
+    async def update(self, name, success):
+        self.updates.append((name, success))
+
+
+class FakeFtClient:
+    def __init__(self, events=None):
+        self._events = events or []
+
+    async def get_campus_events(self, campus_id):
+        return self._events
 
 
 class FakePush:
     def __init__(self):
         self.sent = []
+        self.silent = []
 
     async def send(self, tokens, title, body, data=None):
         self.sent.append({"tokens": tokens, "title": title, "data": data or {}})
         return len(tokens)
 
-
-# ───── notification poller ─────
-
-
-SAMPLE_HTML = """
-<ul>
-  <li class="notification-item">
-    <h4 class="notification--title">Evaluation points sale</h4>
-    <span data-long-date="2026-06-10T10:00:00Z"></span>
-    <div class="notification-item--body">Evaluation points sale 50% off today!</div>
-  </li>
-  <li class="notification-item">
-    <h4 class="notification--title">New event: AI workshop</h4>
-    <span data-long-date="2026-06-11T09:00:00Z"></span>
-    <div class="notification-item--body">Join us in cluster 1</div>
-  </li>
-</ul>
-"""
+    async def send_silent(self, tokens, data):
+        self.silent.append({"tokens": tokens, "data": data})
+        return len(tokens)
 
 
-def test_parse_notifications_html_extracts_items():
-    items = parse_notifications_html(SAMPLE_HTML)
-    assert len(items) == 2
-    assert items[0]["title"] == "Evaluation points sale"
-    # title prefix is stripped from the body
-    assert items[0]["body"] == "50% off today!"
-    assert items[0]["source_date"] == "2026-06-10T10:00:00Z"
-    assert items[0]["signature"] != items[1]["signature"]
+def _event(eid, name="AI workshop"):
+    return {"id": eid, "name": name, "kind": "workshop",
+            "location": "cluster 1", "begin_at": "2026-06-11T09:00:00Z"}
 
 
-def test_classify_notification_types():
-    assert classify_notification("Evaluation points sale") == "evalpo_sale"
-    assert classify_notification("Someone booked a slot") == "review"
-    assert classify_notification("You have an evaluation tomorrow") == "review"
-    assert classify_notification("New event: AI workshop") == "new_event"
+# ───── events poller ─────
 
 
-def test_notify_pushes_global_types_and_marks_pushed():
-    notif_repo = FakeNotificationRepo()
+def test_events_poller_pushes_new_event_once():
+    notif = FakeNotificationRepo()
     devices = FakeDeviceRepo([{"fcm_token": "tok1"}])
     push = FakePush()
-    poller = NotificationPoller(
-        cookie_repo=None, notification_repo=notif_repo,
-        device_repo=devices, state_repo=None, push=push,
+    poller = EventsPoller(
+        notification_repo=notif, device_repo=devices,
+        state_repo=FakeState(), ft_client=FakeFtClient([_event(10)]), push=push,
     )
-    changes = [
-        {"signature": "s1", "title": "Evaluation points sale",
-         "body": "", "source_date": "d"},
-        # review items belong to ReviewPoller — must NOT be pushed here
-        {"signature": "s2", "title": "Someone booked a slot",
-         "body": "", "source_date": "d"},
-    ]
-    asyncio.run(poller.notify(changes))
+    asyncio.run(poller.run())
     assert len(push.sent) == 1
-    assert push.sent[0]["data"]["type"] == "evalpo_sale"
-    assert notif_repo.pushed_sigs == ["s1"]
+    assert push.sent[0]["data"] == {"type": "new_event", "event_id": "10"}
+    assert notif.pushed_sigs == ["event:26:10"]
+
+    # Same event next cycle → dedup, no second push.
+    asyncio.run(poller.run())
+    assert len(push.sent) == 1
 
 
-# ───── review poller ─────
-
-
-def _scale_team(tid, filled=False):
-    return {
-        "id": tid,
-        "filled_at": "2026-06-10T12:00:00Z" if filled else None,
-        "final_mark": 100 if filled else None,
-        "begin_at": "2026-06-10T11:00:00Z",
-        "team": {"name": "libft"},
-        "correcteds": [{"login": "peer"}],
-        "corrector": {"login": "peer"},
-    }
-
-
-def _make_review_poller(devices, fetch_results):
-    """fetch_results: dict path -> list (or None for 401)."""
-    notif_repo = FakeNotificationRepo()
-    device_repo = FakeDeviceRepo(devices)
+def test_events_poller_no_devices_skips_push():
+    notif = FakeNotificationRepo()
     push = FakePush()
-    poller = ReviewPoller(
-        device_repo=device_repo, notification_repo=notif_repo,
-        state_repo=None, push=push,
+    poller = EventsPoller(
+        notification_repo=notif, device_repo=FakeDeviceRepo([]),
+        state_repo=FakeState(), ft_client=FakeFtClient([_event(11)]), push=push,
     )
-
-    async def fake_fetch(access_token, path):
-        return fetch_results[path]
-
-    poller._fetch = fake_fetch
-    return poller, notif_repo, device_repo, push
-
-
-def _device(seeded):
-    return {
-        "user_id": 1, "login": "me", "fcm_token": "tokA",
-        "access_token": "acc", "review_seeded": seeded,
-    }
-
-
-def test_first_poll_seeds_baseline_without_pushing():
-    """B-RP01: opt-in must not dump a backlog of existing scale_teams."""
-    poller, _, device_repo, push = _make_review_poller(
-        [_device(seeded=False)],
-        {"as_corrector": [_scale_team(10)], "as_corrected": []},
-    )
-    asyncio.run(poller._run_for_device(device_repo.devices[0]))
+    asyncio.run(poller.run())
     assert push.sent == []
-    assert device_repo.seeded == ["tokA"]
+    # Signature is still recorded so it won't re-announce once a device appears.
+    assert "event:26:11" in notif.seen
 
 
-def test_new_scale_team_pushes_after_seeding():
-    """B-RP02: a scale_team appearing after the baseline pushes exactly once."""
-    poller, _, device_repo, push = _make_review_poller(
-        [_device(seeded=True)],
-        {"as_corrector": [], "as_corrected": [_scale_team(11)]},
+# ───── eval wake poller ─────
+
+
+def test_eval_wake_sends_contentless_silent_push_to_pref_review():
+    devices = FakeDeviceRepo([{"fcm_token": "a"}, {"fcm_token": "b"}])
+    push = FakePush()
+    poller = EvalWakePoller(
+        device_repo=devices, state_repo=FakeState(), push=push,
     )
-    asyncio.run(poller._run_for_device(device_repo.devices[0]))
-    assert len(push.sent) == 1
-    assert push.sent[0]["title"] == "Evaluation scheduled"
-    assert push.sent[0]["data"] == {"type": "review", "scale_team_id": "11"}
-
-    # Same state on the next poll → dedup, no second push.
-    asyncio.run(poller._run_for_device(device_repo.devices[0]))
-    assert len(push.sent) == 1
-
-
-def test_filled_result_notifies_again_as_new_state():
-    """B-RP03: scheduled→filled is a state change, so it notifies once more."""
-    fetch_results = {"as_corrector": [_scale_team(12)], "as_corrected": []}
-    poller, _, device_repo, push = _make_review_poller(
-        [_device(seeded=True)], fetch_results,
-    )
-    asyncio.run(poller._run_for_device(device_repo.devices[0]))
-    fetch_results["as_corrector"] = [_scale_team(12, filled=True)]
-    asyncio.run(poller._run_for_device(device_repo.devices[0]))
-    assert [p["title"] for p in push.sent] == [
-        "Evaluation scheduled", "Evaluation result",
-    ]
-
-
-def test_revoked_token_clears_credentials():
-    """B-RP04: persistent 401 + failed refresh clears the stored token."""
-    poller, _, device_repo, push = _make_review_poller(
-        [_device(seeded=True)],
-        {"as_corrector": None, "as_corrected": None},
-    )
-
-    async def failed_refresh(device):
-        return None
-
-    poller._refresh_token = failed_refresh
-    asyncio.run(poller._run_for_device(device_repo.devices[0]))
-    assert device_repo.cleared == ["tokA"]
+    asyncio.run(poller.run())
+    assert len(push.silent) == 1
+    assert push.silent[0]["tokens"] == ["a", "b"]
+    assert push.silent[0]["data"] == {"type": "eval_wake"}
+    # never sends a content-bearing push (no 42 data leaves the server)
     assert push.sent == []
+
+
+def test_eval_wake_no_devices_no_push():
+    push = FakePush()
+    poller = EvalWakePoller(
+        device_repo=FakeDeviceRepo([]), state_repo=FakeState(), push=push,
+    )
+    asyncio.run(poller.run())
+    assert push.silent == []

@@ -35,12 +35,6 @@ router = APIRouter(dependencies=[Depends(require_debug_enabled)])
 # routing (review → /evaluations, evalpo/event → /notifications,
 # friend_online → /campus).
 _PUSH_TEMPLATES = {
-    "evalpo_sale": {
-        "title": "Evaluation points sale",
-        "body": "[TEST] 50% off, today only!",
-        "data": lambda now: {"type": "evalpo_sale", "source_date": now},
-        "pref": "evalpo_sale",
-    },
     "new_event": {
         "title": "New event: Test workshop",
         "body": "[TEST] Join us in cluster 1",
@@ -64,11 +58,11 @@ _PUSH_TEMPLATES = {
 
 @router.post("/api/test-push")
 async def test_push(
-    type: str = "evalpo_sale",
+    type: str = "new_event",
     devices: DeviceRepository = Depends(get_device_repo),
     push: PushService = Depends(get_push),
 ):
-    """Send a test push of the given type (?type=evalpo_sale|new_event|review|
+    """Send a test push of the given type (?type=new_event|review|
     friend_online) to every device opted into that preference, with the same
     data payload the real poller would send. Useful because real intra events
     are unpredictable."""
@@ -103,17 +97,17 @@ async def test_notification(
     devices: DeviceRepository = Depends(get_device_repo),
     push: PushService = Depends(get_push),
 ):
-    """Insert a fake notification + trigger push as if scraped from intra."""
-    logger.info("test_notification: inserting fake evalpo_sale notification")
+    """Insert a fake event notification + trigger push (mirrors EventsPoller)."""
+    logger.info("test_notification: inserting fake new_event notification")
     now = datetime.now(timezone.utc)
-    title = "Evaluation points sales"
-    body = f"[TEST] sale started at {now.isoformat()}"
+    title = "New event: Test workshop"
+    body = f"[TEST] announced at {now.isoformat()}"
     source_date = now.isoformat()
 
     sig = hashlib.sha1(f"test|{now.isoformat()}".encode()).hexdigest()[:16]
     inserted = await notifications.insert(sig, title, body, source_date)
 
-    device_list = await devices.get_for_notification("evalpo_sale")
+    device_list = await devices.get_for_notification("new_event")
     tokens = [d["fcm_token"] for d in device_list]
     sent = 0
     if tokens:
@@ -121,7 +115,7 @@ async def test_notification(
             tokens=tokens,
             title=title,
             body=body,
-            data={"type": "evalpo_sale", "signature": sig},
+            data={"type": "new_event", "signature": sig},
         )
 
     return {
@@ -138,14 +132,14 @@ async def poll_now(
     request: Request,
     state: PollerStateRepository = Depends(get_poller_state_repo),
 ):
-    """Trigger the notification poller immediately (don't wait 5 min)."""
-    logger.info("poll_now: manually triggering notification poller")
+    """Trigger the events poller immediately (don't wait for the interval)."""
+    logger.info("poll_now: manually triggering events poller")
     # Reuse the scheduler's instance (set in main.py lifespan) — a fresh
     # instance could double-push the same diff alongside the scheduled run.
-    poller = getattr(request.app.state, "notification_poller", None)
+    poller = getattr(request.app.state, "events_poller", None)
     if poller is None:
         raise HTTPException(status_code=503, detail="poller not started")
     await poller.run()
-    poller_state = await state.get("notification_poller")
+    poller_state = await state.get("events_poller")
     logger.info("poll_now: poller finished, state=%s", poller_state)
     return {"status": "ok", "poller_state": poller_state}
