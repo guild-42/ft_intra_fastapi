@@ -31,6 +31,7 @@ from api.routes_oauth import router as oauth_router
 from api.routes_test import router as test_router
 from api.routes_checkin import router as checkin_router
 from api.routes_legal import router as legal_router
+from api.routes_landing import router as landing_router
 from pollers.notification_poller import NotificationPoller
 from pollers.review_poller import ReviewPoller
 from pollers.friend_poller import FriendPoller
@@ -170,3 +171,4 @@ app.include_router(notifications_router)
 app.include_router(test_router)
 app.include_router(checkin_router)
 app.include_router(legal_router)
+app.include_router(landing_router)
