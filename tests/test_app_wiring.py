@@ -30,5 +30,9 @@ def test_all_routers_present():
         "/api/notifications",
         "/api/checkin",
         "/api/checkins",
+        "/api/friends/request",
+        "/api/friends/respond",
+        "/api/friends/list",
+        "/api/friends",
     ):
         assert expected in paths

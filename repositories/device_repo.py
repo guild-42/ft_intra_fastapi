@@ -112,17 +112,3 @@ class DeviceRepository(BaseRepository):
         logger.debug("device.get_for_user user_id=%s pref=%s → %d devices",
                      user_id, pref_field, len(out))
         return out
-
-    async def get_watching(self, watched_user_id) -> list[dict]:
-        """Devices whose friend watch list contains [watched_user_id] and which
-        opted into friend notifications. Used for friend-login fan-out."""
-        query = (
-            self._db.collection("devices")
-            .where(filter=firestore.FieldFilter(
-                "friend_watch_ids", "array_contains", watched_user_id))
-            .where(filter=firestore.FieldFilter("pref_friend", "==", True))
-        )
-        out = [d.to_dict() async for d in query.stream()]
-        logger.debug("device.get_watching watched_user_id=%s → %d watchers",
-                     watched_user_id, len(out))
-        return out

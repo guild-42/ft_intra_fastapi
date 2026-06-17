@@ -52,6 +52,23 @@ class FtClient:
                     data.get("expires_in", 7200))
         return self._token
 
+    async def get_user(self, login: str) -> dict | None:
+        """Resolve a 42 login to its public user record (id + login). Used to
+        turn a friend-request target login into a user id. Returns None if the
+        login is unknown."""
+        token = await self.get_app_token()
+        if not token:
+            return None
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{FT_API_BASE}/users/{login}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code != 200:
+            logger.info("ft_client.get_user: %s -> %d", login, resp.status_code)
+            return None
+        return resp.json()
+
     async def get_campus_events(self, campus_id: int) -> list[dict]:
         """Upcoming events for a campus (public data, app token). Sorted by most
         recently created so the diff catches newly-announced events. One page of

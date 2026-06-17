@@ -5,6 +5,7 @@ process singletons; repositories are cheap wrappers created per call."""
 from firestore_client import get_client
 from repositories.checkin_repo import CheckinRepository
 from repositories.device_repo import DeviceRepository
+from repositories.friendship_repo import FriendshipRepository
 from repositories.notification_repo import NotificationRepository
 from repositories.poller_state_repo import PollerStateRepository
 from services.ft_client import FtClient
@@ -23,6 +24,10 @@ def get_notification_repo() -> NotificationRepository:
 
 def get_checkin_repo() -> CheckinRepository:
     return CheckinRepository(get_client())
+
+
+def get_friendship_repo() -> FriendshipRepository:
+    return FriendshipRepository(get_client())
 
 
 def get_poller_state_repo() -> PollerStateRepository:

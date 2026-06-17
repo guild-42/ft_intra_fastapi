@@ -1,9 +1,10 @@
 """Friend login push poller.
 
 Polls a campus's active locations once per cycle (one API call, not per-user),
-diffs against the previous active set, and for each *newly* logged-in user
-fans out a push to every device that (a) has that user in its friend watch
-list and (b) opted into friend notifications (``pref_friend``).
+diffs against the previous active set, and for each *newly* logged-in user X
+fans out a push to every user who is X's **accepted mutual friend** (both
+consented, doc_v2/10 Phase D) and opted into friend notifications
+(``pref_friend``). The one-sided watch list is gone.
 
 The previous active set is persisted in the poller_state doc so logins are
 detected across cycles even after a backend restart.
@@ -20,8 +21,9 @@ class FriendPoller(BasePoller):
     name = "friend_poller"
     interval_seconds = 120
 
-    def __init__(self, device_repo, state_repo, ft_client, push):
+    def __init__(self, device_repo, friendship_repo, state_repo, ft_client, push):
         self._devices = device_repo
+        self._friendships = friendship_repo
         self._state = state_repo
         self._ft = ft_client
         self._push = push
@@ -54,12 +56,18 @@ class FriendPoller(BasePoller):
             logger.info("FriendPoller: campus=%d %d newly-logged-in user(s)",
                         campus_id, len(new_logins))
         for uid in new_logins:
-            devices = await self._devices.get_watching(uid)
-            tokens = [d["fcm_token"] for d in devices]
+            # Notify each accepted mutual friend of uid (both consented).
+            friend_ids = await self._friendships.get_accepted_friend_ids(uid)
+            if not friend_ids:
+                continue
+            tokens: list[str] = []
+            for fid in friend_ids:
+                devices = await self._devices.get_for_user(fid, "pref_friend")
+                tokens.extend(d["fcm_token"] for d in devices)
             if not tokens:
                 continue
             login = login_by_id.get(uid, str(uid))
-            logger.info("FriendPoller: %s logged in → %d watcher device(s)",
+            logger.info("FriendPoller: %s logged in → %d friend device(s)",
                         login, len(tokens))
             await self._push.send(
                 tokens=tokens,

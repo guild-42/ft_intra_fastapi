@@ -18,6 +18,7 @@ from config import (
 from deps import (
     get_checkin_repo,
     get_device_repo,
+    get_friendship_repo,
     get_ft_client,
     get_notification_repo,
     get_poller_state_repo,
@@ -31,6 +32,7 @@ from api.routes_test import router as test_router
 from api.routes_checkin import router as checkin_router
 from api.routes_legal import router as legal_router
 from api.routes_landing import router as landing_router
+from api.routes_friends import router as friends_router
 from pollers.events_poller import EventsPoller
 from pollers.eval_wake_poller import EvalWakePoller
 from pollers.friend_poller import FriendPoller
@@ -71,6 +73,7 @@ def _build_pollers():
     )
     friend = FriendPoller(
         device_repo=get_device_repo(),
+        friendship_repo=get_friendship_repo(),
         state_repo=get_poller_state_repo(),
         ft_client=get_ft_client(),
         push=get_push(),
@@ -173,3 +176,4 @@ app.include_router(test_router)
 app.include_router(checkin_router)
 app.include_router(legal_router)
 app.include_router(landing_router)
+app.include_router(friends_router)
