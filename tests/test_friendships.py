@@ -176,8 +176,12 @@ def test_friend_poller_pushes_only_to_accepted_mutual_friends():
     asyncio.run(repo.respond(2, 1, accept=True))
 
     fake.store["devices"] = {
-        "tok1": {"user_id": 1, "fcm_token": "tok1", "pref_friend": True},
-        "tok3": {"user_id": 3, "fcm_token": "tok3", "pref_friend": True},
+        # alice watches bob(2) specifically → gets the push
+        "tok1": {"user_id": 1, "fcm_token": "tok1", "pref_friend": True,
+                 "friend_watch_ids": [2]},
+        # unrelated user 3 (not bob's friend) — must not be pushed
+        "tok3": {"user_id": 3, "fcm_token": "tok3", "pref_friend": True,
+                 "friend_watch_ids": [2]},
     }
     from repositories.device_repo import DeviceRepository
 
@@ -193,3 +197,27 @@ def test_friend_poller_pushes_only_to_accepted_mutual_friends():
     assert len(push.sent) == 1
     assert push.sent[0]["tokens"] == ["tok1"]   # only alice, not unrelated user 3
     assert push.sent[0]["data"] == {"type": "friend_online", "user_id": "2"}
+
+
+def test_friend_poller_respects_per_friend_mute():
+    # alice IS bob's accepted friend but has muted bob (bob not in watch list).
+    fake = FakeClient()
+    repo = FriendshipRepository(fake)
+    asyncio.run(repo.request(1, "alice", 2, "bob"))
+    asyncio.run(repo.respond(2, 1, accept=True))
+    fake.store["devices"] = {
+        "tok1": {"user_id": 1, "fcm_token": "tok1", "pref_friend": True,
+                 "friend_watch_ids": []},
+    }
+    from repositories.device_repo import DeviceRepository
+
+    push = _FakePush()
+    poller = FriendPoller(
+        device_repo=DeviceRepository(fake),
+        friendship_repo=repo,
+        state_repo=_FakeState(prev={"26": []}),
+        ft_client=_FakeFt([{"user": {"id": 2, "login": "bob"}}]),
+        push=push,
+    )
+    asyncio.run(poller.run())
+    assert push.sent == []

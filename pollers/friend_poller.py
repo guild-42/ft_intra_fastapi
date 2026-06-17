@@ -56,14 +56,17 @@ class FriendPoller(BasePoller):
             logger.info("FriendPoller: campus=%d %d newly-logged-in user(s)",
                         campus_id, len(new_logins))
         for uid in new_logins:
-            # Notify each accepted mutual friend of uid (both consented).
+            # Notify each accepted mutual friend of uid (both consented) who also
+            # opted in for THIS friend specifically (uid in their watch list).
             friend_ids = await self._friendships.get_accepted_friend_ids(uid)
             if not friend_ids:
                 continue
             tokens: list[str] = []
             for fid in friend_ids:
                 devices = await self._devices.get_for_user(fid, "pref_friend")
-                tokens.extend(d["fcm_token"] for d in devices)
+                for d in devices:
+                    if uid in (d.get("friend_watch_ids") or []):
+                        tokens.append(d["fcm_token"])
             if not tokens:
                 continue
             login = login_by_id.get(uid, str(uid))
