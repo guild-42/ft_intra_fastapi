@@ -14,7 +14,7 @@ _PRIVACY_HTML = """<!DOCTYPE html>
 <title>ft_intra — Privacy Policy</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.6;
+         max-width: 820px; margin: 40px auto; padding: 0 20px; line-height: 1.6;
          color: #1d1d1f; }
   h1 { font-size: 1.8rem; } h2 { margin-top: 2rem; font-size: 1.25rem; }
   table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
@@ -22,21 +22,107 @@ _PRIVACY_HTML = """<!DOCTYPE html>
   th { background: #f5f5f7; }
   code { background: #f5f5f7; padding: 1px 5px; border-radius: 4px; }
   .muted { color: #6e6e73; font-size: 0.9rem; }
+
+  /* data-flow visualization */
+  .map { display: flex; flex-wrap: wrap; gap: 14px; margin: 1.2rem 0; }
+  .node { flex: 1 1 230px; border: 2px solid #d2d2d7; border-radius: 14px;
+          padding: 14px 16px; background: #fbfbfd; }
+  .node h3 { margin: 0 0 8px; font-size: 1.05rem; display: flex; align-items: center; gap: 8px; }
+  .node.device { border-color: #00BABC; }
+  .node.server { border-color: #ff9f0a; }
+  .node.api    { border-color: #5e9cff; }
+  .node ul { margin: 6px 0 0; padding-left: 18px; }
+  .node li { font-size: 0.9rem; margin: 4px 0; }
+  .badge { display: inline-block; font-size: 0.72rem; font-weight: 700;
+           padding: 1px 7px; border-radius: 20px; margin-left: 4px; vertical-align: middle; }
+  .b-stay { background: #def7ec; color: #03543f; }
+  .b-never { background: #fde8e8; color: #9b1c1c; }
+  .b-store { background: #fef3c7; color: #92400e; }
+  .flow { font-size: 0.9rem; color: #3a3a3c; background: #f5f5f7;
+          border-radius: 12px; padding: 12px 16px; margin: 0.6rem 0 1.4rem; }
+  .flow b { color: #1d1d1f; }
+  .legend { font-size: 0.82rem; color: #6e6e73; }
 </style>
 </head>
 <body>
 <h1>ft_intra — Privacy Policy</h1>
-<p class="muted">Last updated: 2026-06-15</p>
+<p class="muted">Last updated: 2026-06-18</p>
 
 <p>ft_intra is an <strong>unofficial</strong> mobile client for École&nbsp;42
 students. It shows your 42 intra data (profile, projects, evaluations, campus
 presence) and delivers push notifications. This policy explains what data the
-app handles and why.</p>
+app handles, where it lives, and how the design stays within the
+<strong>42 API General Terms of Use</strong>.</p>
 
 <h2>Who we are</h2>
 <p>ft_intra is built and operated by the Guild42 community for 42 students. It
 is not affiliated with or endorsed by École&nbsp;42 / the 42 Network.</p>
-<p>Contact: <strong>bibimsoba@gmail.com</strong></p>
+<p>Contact: <strong>ka-kun@actraise.org</strong></p>
+
+<h2>Where your data lives (at a glance)</h2>
+<p>The single most important point: <strong>your 42 credentials never reach our
+server.</strong> Your 42 login token stays on your phone. Our server only ever
+holds a push token, your notification preferences, and a list of mutually-agreed
+friend ids — none of which is 42 account data.</p>
+
+<div class="map">
+  <div class="node device">
+    <h3>📱 Your device</h3>
+    <ul>
+      <li>42 OAuth token <span class="badge b-stay">stays here</span> (iOS Keychain)</li>
+      <li>Friend nicknames &amp; Discord links <span class="badge b-stay">stays here</span></li>
+      <li>Cached profile / presence for display</li>
+      <li>"Already seen" evaluation markers (for dedupe)</li>
+    </ul>
+  </div>
+  <div class="node server">
+    <h3>☁️ Our server</h3>
+    <ul>
+      <li>FCM push token <span class="badge b-store">stored</span></li>
+      <li>Notification preferences <span class="badge b-store">stored</span></li>
+      <li>Friendships: 42 ids + status <span class="badge b-store">stored</span></li>
+      <li>42 OAuth token <span class="badge b-never">never</span></li>
+      <li>42 session cookie <span class="badge b-never">never</span></li>
+      <li>Your profile / grades / messages <span class="badge b-never">never</span></li>
+    </ul>
+  </div>
+  <div class="node api">
+    <h3>🟦 42 official API</h3>
+    <ul>
+      <li>Source of profile, projects, evaluations</li>
+      <li>Read with the official OAuth (PKCE) flow</li>
+      <li>Public campus events &amp; presence</li>
+    </ul>
+  </div>
+</div>
+
+<div class="flow">
+  <b>Evaluation notifications:</b> the server cannot read your 42 data, so it
+  sends a content-less "wake" ping &rarr; your phone uses <i>its own</i> token to
+  read your evaluations from the 42 API &rarr; your phone shows the notification
+  locally. <b>No 42 data passes through our server.</b>
+  <br><br>
+  <b>Friend-login notifications:</b> we only watch a friend's <i>public</i>
+  campus presence, and only after <b>both</b> of you agreed (friend request →
+  accept). Either side can revoke at any time.
+</div>
+<p class="legend">Legend:
+  <span class="badge b-stay">stays here</span> never leaves the device ·
+  <span class="badge b-store">stored</span> kept on our server ·
+  <span class="badge b-never">never</span> we never receive or store it.</p>
+
+<h2>How we comply with the 42 API Terms of Use</h2>
+<p>The app is deliberately designed so that it does not store 42 credentials on
+a third-party server, does not scrape the intranet, and does not process other
+students' personal data without their consent. Concretely:</p>
+<table>
+<tr><th>Requirement (42 General Terms of Use)</th><th>What ft_intra does</th></tr>
+<tr><td>Your 42 token/session must not be handed to third parties</td><td>The OAuth token lives in your device Keychain and is <strong>never stored on our server</strong>. It is transmitted only once, in memory, to verify your identity via the official <code>/v2/me</code> endpoint (so nobody can register as someone else), then discarded — never written to disk or database.</td></tr>
+<tr><td>No bulk extraction / scraping of the intranet</td><td>We removed all cookie-based scraping. Data comes <strong>only</strong> from the official 42 API.</td></tr>
+<tr><td>Another person's data needs that person's consent</td><td>Friend-login alerts require a <strong>mutual</strong> friend request → accept. We watch only <em>public</em> campus presence, and only of users who agreed.</td></tr>
+<tr><td>Data minimisation</td><td>The server stores only a push token, preferences and friend ids — no names, grades, messages, or profile data.</td></tr>
+<tr><td>Right to deletion</td><td>You can delete your server-side data anytime in the app; logging out removes the token from your device.</td></tr>
+</table>
 
 <h2>What data we handle</h2>
 <p>The app works against the official 42 API and a self-hosted backend.

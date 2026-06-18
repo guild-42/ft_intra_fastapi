@@ -60,7 +60,7 @@ _LANDING_HTML = """<!DOCTYPE html>
     students of École&nbsp;42. It is <strong>not affiliated with or endorsed by
     École&nbsp;42 / the 42 Network</strong>. Sign-in uses your existing 42 account
     (the school's official OAuth).</p>
-    <p>Contact: <a href="mailto:bibimsoba@gmail.com">bibimsoba@gmail.com</a></p>
+    <p>Contact: <a href="mailto:ka-kun@actraise.org">ka-kun@actraise.org</a></p>
   </section>
 
   <section>
