@@ -22,12 +22,18 @@ services:
       # 下の volumes でマウントしたファイルを指す(env に JSON 全文は入れない)
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
       # --- poller 間隔・対象 (任意。未設定なら下記 default) ---
-      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-300}
-      REVIEW_POLL_INTERVAL_SECONDS: ${REVIEW_POLL_INTERVAL_SECONDS:-300}
+      EVENT_POLL_INTERVAL_SECONDS: ${EVENT_POLL_INTERVAL_SECONDS:-600}
+      EVAL_WAKE_INTERVAL_SECONDS: ${EVAL_WAKE_INTERVAL_SECONDS:-1800}
       FRIEND_POLL_INTERVAL_SECONDS: ${FRIEND_POLL_INTERVAL_SECONDS:-120}
       CHECKOUT_SWEEP_INTERVAL_SECONDS: ${CHECKOUT_SWEEP_INTERVAL_SECONDS:-600}
       FRIEND_POLLER_CAMPUS_IDS: ${FRIEND_POLLER_CAMPUS_IDS:-26}
+      EVENT_POLLER_CAMPUS_IDS: ${EVENT_POLLER_CAMPUS_IDS:-26}
       CHECKIN_TTL_SECONDS: ${CHECKIN_TTL_SECONDS:-10800}
+    # Pin Traefik to the shared `coolify` network. Without this, when the app is
+    # attached to more than one network, Traefik can resolve it on a per-app
+    # network the proxy isn't on → intermittent 504 / "context canceled" / 000.
+    labels:
+      - traefik.docker.network=coolify
     volumes:
       # secret はサーバ上のファイルを read-only でマウント(Coolify env の制限/不調回避)
       - /opt/ft-intra-secrets/sa.json:/secrets/sa.json:ro
@@ -38,9 +44,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    # Only the shared `coolify` network (Traefik lives here). Do NOT add the
+    # compose `default` network — it creates a separate <project>_default the
+    # proxy isn't attached to, which broke routing.
     networks:
       - coolify
-      - default
 
 networks:
   coolify:
