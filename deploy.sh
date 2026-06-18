@@ -58,8 +58,17 @@ for i in $(seq 1 60); do
   sleep 10
 done
 
-echo "==> Verifying live app"
-code=$(curl -s -o /dev/null -w '%{http_code}' "$APP_URL/health")
-echo "    GET /health -> $code"
-[ "$code" = "200" ] || { echo "health check failed"; exit 1; }
+# After a deploy the container is healthy immediately, but the edge route
+# (Cloudflare Tunnel -> Traefik) takes a few dozen seconds to re-point at the new
+# container, so /health returns 502/503/000 transiently. Poll instead of failing
+# on the first miss. Up to ~3 min (18 x 10s).
+echo "==> Verifying live app (polling for edge cutover)"
+code=""
+for i in $(seq 1 18); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 "$APP_URL/health")
+  printf '    [%02d] GET /health -> %s\n' "$i" "$code"
+  [ "$code" = "200" ] && break
+  sleep 10
+done
+[ "$code" = "200" ] || { echo "health check failed after retries"; exit 1; }
 echo "==> Done."
