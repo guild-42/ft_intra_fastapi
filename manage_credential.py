@@ -20,13 +20,37 @@ history.
 """
 import argparse
 import asyncio
+import os
 import sys
 from datetime import datetime, timezone
 
-from config import FT_API_CLIENT_ID, FT_SECRET_ENC_KEY
-from deps import get_ft_credentials
-from firestore_client import get_client
-from repositories.credential_repo import CredentialRepository
+
+def _load_secrets_env(path="/secrets/ft.env"):
+    """Load the mounted secrets file into os.environ.
+
+    entrypoint.sh sources this for the server process, but `docker exec` starts
+    a fresh process that skips the entrypoint — so without this the CLI runs
+    with no FT_SECRET_ENC_KEY and cannot decrypt anything. Must happen before
+    `config` is imported, since config reads os.getenv at import time.
+    """
+    try:
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    except FileNotFoundError:
+        pass
+
+
+_load_secrets_env()
+
+from config import FT_API_CLIENT_ID, FT_SECRET_ENC_KEY  # noqa: E402
+from deps import get_ft_credentials  # noqa: E402
+from firestore_client import get_client  # noqa: E402
+from repositories.credential_repo import CredentialRepository  # noqa: E402
 
 
 def _repo():
