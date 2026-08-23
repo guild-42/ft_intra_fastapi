@@ -1,6 +1,7 @@
 import logging
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, Request
@@ -14,12 +15,14 @@ from config import (
     EVAL_WAKE_INTERVAL_SECONDS,
     FRIEND_POLL_INTERVAL_SECONDS,
     CHECKOUT_SWEEP_INTERVAL_SECONDS,
+    CREDENTIAL_CHECK_INTERVAL_SECONDS,
 )
 from deps import (
     get_checkin_repo,
     get_device_repo,
     get_friendship_repo,
     get_ft_client,
+    get_ft_credentials,
     get_notification_repo,
     get_poller_state_repo,
     get_push,
@@ -37,6 +40,7 @@ from pollers.events_poller import EventsPoller
 from pollers.eval_wake_poller import EvalWakePoller
 from pollers.friend_poller import FriendPoller
 from pollers.checkout_sweeper import CheckoutSweeper
+from pollers.credential_monitor import CredentialMonitor
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -82,7 +86,13 @@ def _build_pollers():
         checkin_repo=get_checkin_repo(),
         state_repo=get_poller_state_repo(),
     )
-    return events, eval_wake, friend, sweeper
+    credentials = CredentialMonitor(
+        credentials=get_ft_credentials(),
+        state_repo=get_poller_state_repo(),
+        device_repo_factory=get_device_repo,
+        push=get_push(),
+    )
+    return events, eval_wake, friend, sweeper, credentials
 
 
 @asynccontextmanager
@@ -90,7 +100,7 @@ async def lifespan(app: FastAPI):
     await firestore_client.init_db()
     logger.info("Database initialized")
 
-    events, eval_wake, friend, sweeper = _build_pollers()
+    events, eval_wake, friend, sweeper, credentials = _build_pollers()
     # Shared with /api/poll-now so a manual trigger reuses the same instance.
     app.state.events_poller = events
 
@@ -122,12 +132,23 @@ async def lifespan(app: FastAPI):
         id="checkout_sweeper",
         replace_existing=True,
     )
+    scheduler.add_job(
+        credentials.run,
+        "interval",
+        seconds=CREDENTIAL_CHECK_INTERVAL_SECONDS,
+        id="credential_monitor",
+        replace_existing=True,
+        # Run shortly after boot too: a secret that expired while the process was
+        # down should self-heal on startup, not one interval later.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+    )
     scheduler.start()
     logger.info(
-        "Scheduler started (events=%ds, eval_wake=%ds, friend=%ds)",
+        "Scheduler started (events=%ds, eval_wake=%ds, friend=%ds, credentials=%ds)",
         EVENT_POLL_INTERVAL_SECONDS,
         EVAL_WAKE_INTERVAL_SECONDS,
         FRIEND_POLL_INTERVAL_SECONDS,
+        CREDENTIAL_CHECK_INTERVAL_SECONDS,
     )
 
     yield

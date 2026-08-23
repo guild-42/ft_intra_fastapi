@@ -11,11 +11,12 @@ def test_main_imports_and_builds_pollers():
 
     assert main.app is not None
     # Each poller constructs with its injected repositories/services.
-    events, eval_wake, friend, sweeper = main._build_pollers()
+    events, eval_wake, friend, sweeper, credentials = main._build_pollers()
     assert events.name == "events_poller"
     assert eval_wake.name == "eval_wake_poller"
     assert friend.name == "friend_poller"
     assert sweeper.name == "checkout_sweeper"
+    assert credentials.name == "credential_monitor"
 
 
 def test_all_routers_present():
@@ -24,6 +25,7 @@ def test_all_routers_present():
     paths = {r.path for r in main.app.routes}
     for expected in (
         "/health",
+        "/health/deps",
         "/api/oauth/exchange",
         "/api/register",
         "/api/credentials",

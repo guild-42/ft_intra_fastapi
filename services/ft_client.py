@@ -2,54 +2,68 @@
 
 The token is scoped to ``public`` with no resource owner — enough to read public
 data such as campus locations, which the friend poller needs. The app token is
-cached in-process until shortly before expiry. Credentials come from config
-(single source of truth), not a local os.getenv."""
+cached in-process until shortly before expiry.
+
+The client_secret comes from FtCredentials rather than config directly: 42
+expires it on a schedule, so a rejected secret triggers a promotion of the
+staged replacement and one retry instead of failing every poll until someone
+notices (see services/ft_credentials.py)."""
 import logging
 import time
 
 import httpx
 
-from config import (
-    FT_API_BASE,
-    FT_API_CLIENT_ID,
-    FT_API_CLIENT_SECRET,
-    FT_TOKEN_URL,
-)
+from config import FT_API_BASE, FT_TOKEN_URL
 
 logger = logging.getLogger(__name__)
 
 
 class FtClient:
-    def __init__(self, client_id: str = FT_API_CLIENT_ID,
-                 client_secret: str = FT_API_CLIENT_SECRET):
-        self._client_id = client_id
-        self._client_secret = client_secret
+    def __init__(self, credentials):
+        self._credentials = credentials
         self._token: str | None = None
         self._token_expiry: float = 0.0
+
+    async def _request_token(self, secret: str) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=15) as client:
+            return await client.post(
+                FT_TOKEN_URL,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self._credentials.client_id,
+                    "client_secret": secret,
+                },
+            )
 
     async def get_app_token(self) -> str | None:
         if self._token and time.time() < self._token_expiry - 60:
             logger.debug("ft_client.get_app_token: using cached app token")
             return self._token
         logger.info("ft_client.get_app_token: requesting new client_credentials token")
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                FT_TOKEN_URL,
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret,
-                },
+        secret = await self._credentials.current()
+        resp = await self._request_token(secret)
+
+        # 401 here means the secret itself was rejected (expired/rotated), not a
+        # transient error — so try promoting the staged replacement before giving up.
+        if resp.status_code == 401:
+            logger.warning(
+                "ft_client.get_app_token: secret rejected by 42, attempting rotation"
             )
+            rotated = await self._credentials.rotate_if_possible()
+            if rotated:
+                resp = await self._request_token(rotated)
+
         if resp.status_code != 200:
             logger.error("client_credentials token error %d: %s",
                          resp.status_code, resp.text)
+            await self._credentials.record_auth(False, resp.text)
             return None
         data = resp.json()
         self._token = data["access_token"]
         self._token_expiry = time.time() + int(data.get("expires_in", 7200))
         logger.info("ft_client.get_app_token: new app token (expires_in=%ss)",
                     data.get("expires_in", 7200))
+        await self._credentials.record_auth(True)
         return self._token
 
     async def get_user(self, login: str) -> dict | None:

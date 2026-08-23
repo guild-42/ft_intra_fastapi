@@ -101,6 +101,16 @@ class DeviceRepository(BaseRepository):
                      notification_type, field, len(out))
         return out
 
+    async def get_all_for_user(self, user_id) -> list[dict]:
+        """Every device for a user, regardless of notification prefs. Used for
+        operational alerts (credential expiry) that aren't user-facing prefs."""
+        query = self._db.collection("devices").where(
+            filter=firestore.FieldFilter("user_id", "==", user_id)
+        )
+        out = [d.to_dict() async for d in query.stream()]
+        logger.debug("device.get_all_for_user user_id=%s → %d devices", user_id, len(out))
+        return out
+
     async def get_for_user(self, user_id, pref_field="pref_review") -> list[dict]:
         """Devices belonging to a specific 42 user that opted into [pref_field]."""
         query = (
