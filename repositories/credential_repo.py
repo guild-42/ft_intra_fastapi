@@ -95,6 +95,14 @@ class CredentialRepository(BaseRepository):
         logger.warning("credential_repo.promote_next: promoted staged secret to current")
         return promoted
 
+    async def record_alert(self, kind: str):
+        """Remember that an operator alert of this kind just went out, so the
+        hourly monitor doesn't re-send it every run."""
+        await self._doc().set(
+            {"last_alert_kind": kind, "last_alert_at": datetime.now(timezone.utc)},
+            merge=True,
+        )
+
     async def record_auth(self, ok: bool, error: str | None = None):
         """Track the outcome of the most recent 42 token attempt so /health can
         surface a broken credential instead of reporting a bare 200."""

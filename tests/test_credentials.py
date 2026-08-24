@@ -231,3 +231,70 @@ async def test_ft_client_gives_up_when_nothing_staged():
 
     assert await client.get_app_token() is None
     assert (await repo.get())["last_auth_ok"] is False
+
+
+# ───── alert throttling ─────
+
+class _FakePush:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, tokens, title, body, data=None):
+        self.sent.append(title)
+        return len(tokens)
+
+
+class _FakeDevices:
+    async def get_all_for_user(self, uid):
+        return [{"fcm_token": "tok-1"}]
+
+
+class _FakeState:
+    async def update(self, name, success=True):
+        pass
+
+
+def _monitor(repo, creds, push):
+    import config
+    from pollers.credential_monitor import CredentialMonitor
+    config.ADMIN_USER_IDS = [260029]
+    return CredentialMonitor(
+        credentials=creds, state_repo=_FakeState(),
+        device_repo_factory=lambda: _FakeDevices(), push=push,
+        credential_repo_factory=lambda: repo,
+    )
+
+
+@pytest.mark.asyncio
+async def test_alert_is_not_resent_within_the_repeat_window(monkeypatch):
+    """The monitor runs hourly; an unthrottled warning would push ~240 times
+    across the warning window and train the operator to ignore it."""
+    import pollers.credential_monitor as cm
+    monkeypatch.setattr(cm, "ADMIN_USER_IDS", [260029])
+
+    repo = _repo()
+    await repo.save(client_id="u-1", secret=CUR)
+    creds = _creds(repo, accepts=(CUR,))
+    push = _FakePush()
+    mon = _monitor(repo, creds, push)
+
+    await mon._alert("t", "b", kind="expiring")
+    await mon._alert("t", "b", kind="expiring")
+    await mon._alert("t", "b", kind="expiring")
+    assert len(push.sent) == 1, "repeat alerts of the same kind must be suppressed"
+
+
+@pytest.mark.asyncio
+async def test_a_different_alert_kind_still_gets_through(monkeypatch):
+    import pollers.credential_monitor as cm
+    monkeypatch.setattr(cm, "ADMIN_USER_IDS", [260029])
+
+    repo = _repo()
+    await repo.save(client_id="u-1", secret=CUR)
+    creds = _creds(repo, accepts=(CUR,))
+    push = _FakePush()
+    mon = _monitor(repo, creds, push)
+
+    await mon._alert("warn", "b", kind="expiring")
+    await mon._alert("down", "b", kind="down")   # escalation must not be swallowed
+    assert push.sent == ["warn", "down"]

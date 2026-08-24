@@ -35,7 +35,13 @@ FT_SECRET_ENC_KEY = os.getenv("FT_SECRET_ENC_KEY", "")
 CREDENTIAL_CHECK_INTERVAL_SECONDS = int(
     os.getenv("CREDENTIAL_CHECK_INTERVAL_SECONDS", "3600")
 )
-FT_SECRET_WARN_DAYS = int(os.getenv("FT_SECRET_WARN_DAYS", "10"))
+# 42 publishes the replacement exactly 7 days before expiry (observed
+# 2026-08-15 -> 2026-08-22), so warning earlier than that just nags about a
+# secret that does not exist yet.
+FT_SECRET_WARN_DAYS = int(os.getenv("FT_SECRET_WARN_DAYS", "7"))
+# The monitor runs hourly; without this the same warning would push every run
+# for the whole window.
+FT_SECRET_ALERT_REPEAT_HOURS = int(os.getenv("FT_SECRET_ALERT_REPEAT_HOURS", "24"))
 
 # 42 user ids that receive the "secret is about to expire" push. Without this
 # the warning is log/-health only, which is how the last two outages went

@@ -19,6 +19,7 @@ from config import (
 )
 from deps import (
     get_checkin_repo,
+    get_credential_repo,
     get_device_repo,
     get_friendship_repo,
     get_ft_client,
@@ -91,6 +92,7 @@ def _build_pollers():
         state_repo=get_poller_state_repo(),
         device_repo_factory=get_device_repo,
         push=get_push(),
+        credential_repo_factory=get_credential_repo,
     )
     return events, eval_wake, friend, sweeper, credentials
 

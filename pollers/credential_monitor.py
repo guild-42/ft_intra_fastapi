@@ -11,8 +11,14 @@ Two jobs, both aimed at the failure that took the app down on 2026-06-30 and
    still time to act.
 """
 import logging
+from datetime import datetime, timedelta, timezone
 
-from config import ADMIN_USER_IDS, CREDENTIAL_CHECK_INTERVAL_SECONDS, FT_SECRET_WARN_DAYS
+from config import (
+    ADMIN_USER_IDS,
+    CREDENTIAL_CHECK_INTERVAL_SECONDS,
+    FT_SECRET_ALERT_REPEAT_HOURS,
+    FT_SECRET_WARN_DAYS,
+)
 from pollers.base import BasePoller
 
 logger = logging.getLogger(__name__)
@@ -22,8 +28,10 @@ class CredentialMonitor(BasePoller):
     name = "credential_monitor"
     interval_seconds = CREDENTIAL_CHECK_INTERVAL_SECONDS
 
-    def __init__(self, credentials, state_repo, device_repo_factory=None, push=None):
+    def __init__(self, credentials, state_repo, device_repo_factory=None, push=None,
+                 credential_repo_factory=None):
         self._credentials = credentials
+        self._credentials_repo_factory = credential_repo_factory
         self._state = state_repo
         self._device_repo_factory = device_repo_factory
         self._push = push
@@ -37,10 +45,30 @@ class CredentialMonitor(BasePoller):
     async def notify(self, changes: list[dict]) -> None:
         return None
 
-    async def _alert(self, title: str, body: str):
+    async def _alert(self, title: str, body: str, kind: str):
+        """Send an operator alert, at most once per FT_SECRET_ALERT_REPEAT_HOURS
+        per kind.
+
+        Without the throttle this runs every poll: the expiry warning would fire
+        hourly for the whole warning window (~240 pushes), which trains the
+        operator to ignore the one alert that matters."""
         logger.error("CredentialMonitor ALERT: %s — %s", title, body)
         if not (self._push and self._device_repo_factory and ADMIN_USER_IDS):
             return
+        try:
+            repo = self._credentials_repo_factory()
+            data = await repo.get() or {}
+            last_at, last_kind = data.get("last_alert_at"), data.get("last_alert_kind")
+            if last_kind == kind and hasattr(last_at, "tzinfo"):
+                if last_at.tzinfo is None:
+                    last_at = last_at.replace(tzinfo=timezone.utc)
+                due = last_at + timedelta(hours=FT_SECRET_ALERT_REPEAT_HOURS)
+                if datetime.now(timezone.utc) < due:
+                    logger.info("CredentialMonitor: alert %r suppressed until %s",
+                                kind, due.isoformat())
+                    return
+        except Exception:
+            logger.debug("CredentialMonitor: alert throttle check failed", exc_info=True)
         try:
             repo = self._device_repo_factory()
             tokens = []
@@ -50,6 +78,7 @@ class CredentialMonitor(BasePoller):
             if tokens:
                 await self._push.send(tokens, title, body,
                                       data={"type": "credential_alert"})
+            await self._credentials_repo_factory().record_alert(kind)
         except Exception:
             logger.exception("CredentialMonitor: failed to push alert")
 
@@ -72,6 +101,7 @@ class CredentialMonitor(BasePoller):
                         "42 secret rotated",
                         "The 42 client_secret expired and the staged replacement "
                         "was promoted automatically. Stage the next one.",
+                        kind="rotated",
                     )
                 else:
                     await self._credentials.record_auth(False, "secret rejected")
@@ -80,6 +110,7 @@ class CredentialMonitor(BasePoller):
                         "The 42 client_secret is rejected and no replacement is "
                         "staged. Login and notifications are broken until a new "
                         "secret is staged (./rotate-secret.sh).",
+                        kind="down",
                     )
 
             status = await self._credentials.status()
@@ -90,7 +121,8 @@ class CredentialMonitor(BasePoller):
                     "42 secret expires soon",
                     f"The 42 client_secret expires in {days} day(s) and no "
                     f"replacement is staged. Copy the NEXT SECRET from the 42 "
-                    f"dashboard and run ./rotate-secret.sh --next <secret>.",
+                    f"dashboard and run ./rotate-secret.sh next <secret>.",
+                    kind="expiring",
                 )
             await self._state.update(self.name, success=ok)
         except Exception:
