@@ -12,7 +12,19 @@ FRIEND_POLL_INTERVAL_SECONDS = int(os.getenv("FRIEND_POLL_INTERVAL_SECONDS", "12
 # pref_review devices so they fetch their own /me/scale_teams (the server never
 # holds the user token; see doc_v2/10). iOS throttles silent push, so this is a
 # best-effort, non-realtime nudge.
-EVAL_WAKE_INTERVAL_SECONDS = int(os.getenv("EVAL_WAKE_INTERVAL_SECONDS", "1800"))
+# Blind fallback wake. ReviewPoller now covers scale_teams event-driven, so this
+# only has to catch what that can't see (e.g. feedbacks). Relaxed from 30min:
+# iOS budgets silent pushes per app per day, and spending ~48/day on blind polls
+# made the ones that matter less likely to be delivered.
+EVAL_WAKE_INTERVAL_SECONDS = int(os.getenv("EVAL_WAKE_INTERVAL_SECONDS", "7200"))
+
+# Server-side review detection: polls the PUBLIC scale_teams of each pref_review
+# user with the app token and wakes only that user, only on an actual change.
+REVIEW_POLL_INTERVAL_SECONDS = int(os.getenv("REVIEW_POLL_INTERVAL_SECONDS", "120"))
+# One 42 request per user per tick. 42 allows 2 req/sec and 1200 req/hour, so
+# this caps the fan-out rather than letting a growing user base quietly break the
+# rate limit. At 120s, 50 users ≈ 1500 req/hour — raise the interval before this.
+REVIEW_POLLER_MAX_USERS = int(os.getenv("REVIEW_POLLER_MAX_USERS", "30"))
 FT_API_BASE = "https://api.intra.42.fr/v2"
 
 # 42 OAuth app credentials — read ONCE here (single source of truth). Previously

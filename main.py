@@ -16,6 +16,7 @@ from config import (
     FRIEND_POLL_INTERVAL_SECONDS,
     CHECKOUT_SWEEP_INTERVAL_SECONDS,
     CREDENTIAL_CHECK_INTERVAL_SECONDS,
+    REVIEW_POLL_INTERVAL_SECONDS,
 )
 from deps import (
     get_checkin_repo,
@@ -42,6 +43,7 @@ from pollers.eval_wake_poller import EvalWakePoller
 from pollers.friend_poller import FriendPoller
 from pollers.checkout_sweeper import CheckoutSweeper
 from pollers.credential_monitor import CredentialMonitor
+from pollers.review_poller import ReviewPoller
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -94,7 +96,13 @@ def _build_pollers():
         push=get_push(),
         credential_repo_factory=get_credential_repo,
     )
-    return events, eval_wake, friend, sweeper, credentials
+    review = ReviewPoller(
+        device_repo=get_device_repo(),
+        state_repo=get_poller_state_repo(),
+        ft_client=get_ft_client(),
+        push=get_push(),
+    )
+    return events, eval_wake, friend, sweeper, credentials, review
 
 
 @asynccontextmanager
@@ -102,7 +110,7 @@ async def lifespan(app: FastAPI):
     await firestore_client.init_db()
     logger.info("Database initialized")
 
-    events, eval_wake, friend, sweeper, credentials = _build_pollers()
+    events, eval_wake, friend, sweeper, credentials, review = _build_pollers()
     # Shared with /api/poll-now so a manual trigger reuses the same instance.
     app.state.events_poller = events
 
@@ -135,6 +143,13 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
     scheduler.add_job(
+        review.run,
+        "interval",
+        seconds=REVIEW_POLL_INTERVAL_SECONDS,
+        id="review_poller",
+        replace_existing=True,
+    )
+    scheduler.add_job(
         credentials.run,
         "interval",
         seconds=CREDENTIAL_CHECK_INTERVAL_SECONDS,
@@ -146,11 +161,12 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
     logger.info(
-        "Scheduler started (events=%ds, eval_wake=%ds, friend=%ds, credentials=%ds)",
+        "Scheduler started (events=%ds, eval_wake=%ds, friend=%ds, credentials=%ds, review=%ds)",
         EVENT_POLL_INTERVAL_SECONDS,
         EVAL_WAKE_INTERVAL_SECONDS,
         FRIEND_POLL_INTERVAL_SECONDS,
         CREDENTIAL_CHECK_INTERVAL_SECONDS,
+        REVIEW_POLL_INTERVAL_SECONDS,
     )
 
     yield

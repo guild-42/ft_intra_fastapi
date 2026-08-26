@@ -83,6 +83,34 @@ class FtClient:
             return None
         return resp.json()
 
+    async def get_user_scale_teams(self, user_id: int) -> list[dict] | None:
+        """A user's evaluations (both roles) from the PUBLIC API.
+
+        Confirmed to return 200 for an app token (client_credentials, scope
+        ``public``) — no 42 user token involved, so this stays inside the
+        doc_v2/10 rule that the server never holds one. Lets the server notice a
+        newly booked review immediately instead of waking every device blindly on
+        a timer.
+
+        Returns None on failure so the caller can tell "nothing new" apart from
+        "couldn't look" and avoid diffing against an empty list.
+        """
+        token = await self.get_app_token()
+        if not token:
+            logger.warning("ft_client.get_user_scale_teams: no app token")
+            return None
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.get(
+                f"{FT_API_BASE}/users/{user_id}/scale_teams",
+                params={"sort": "-updated_at", "page[size]": 40},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        if resp.status_code != 200:
+            logger.warning("ft_client.get_user_scale_teams: user=%s -> %d",
+                           user_id, resp.status_code)
+            return None
+        return resp.json()
+
     async def get_campus_events(self, campus_id: int) -> list[dict]:
         """Upcoming events for a campus (public data, app token). Sorted by most
         recently created so the diff catches newly-announced events. One page of
